@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Terminal,
+  TriangleAlert,
   Unplug,
 } from "lucide-react"
 import { type FormEvent, type ReactNode, useId, useState } from "react"
@@ -31,11 +32,13 @@ import {
   comparisons,
   type Device,
   date,
+  isApiError,
   online,
   type Project,
   stages,
   type WorkingCopy,
 } from "./api"
+import { HistoryPanel } from "./HistoryPanel"
 
 const inputStyle =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -460,13 +463,48 @@ export function ProjectDetail({ id }: { id: string }) {
     refetchInterval: 30_000,
   })
   const project = projects.data?.find((p) => p.id === id)
+  // Draft state is owned here, not by the query cache: background refetches
+  // must never overwrite what the user is typing. `draft` is null until the
+  // user first edits, then holds their text; `baseRevision` pins the revision
+  // the draft started from so a stale base is never attached to a new draft.
+  const [draft, setDraft] = useState<{
+    status_note: string
+    next_step: string
+    stage: string
+  } | null>(null)
+  const [baseRevision, setBaseRevision] = useState<number | null>(null)
+  const [conflict, setConflict] = useState(false)
+  // Pin the draft to the revision it started from, so a background refetch
+  // can never attach a newer revision to an older draft.
+  function edit(next: {
+    status_note: string
+    next_step: string
+    stage: string
+  }) {
+    if (draft === null) setBaseRevision(project?.revision ?? null)
+    setDraft(next)
+  }
   const save = useMutation({
     mutationFn: (body: unknown) => api<Project>(`/projects/${id}`, body, "PUT"),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      setDraft(null)
+      setBaseRevision(saved.revision)
+      setConflict(false)
       cache.invalidateQueries({ queryKey: ["projects"] })
+      cache.invalidateQueries({ queryKey: ["history", id] })
       toast.success("研究进展已保存")
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      if (isApiError(e, 409)) {
+        // Keep the whole draft; only flag that another session saved first.
+        // Refetching reveals the newer revision without touching the draft.
+        setConflict(true)
+        projects.refetch()
+        cache.invalidateQueries({ queryKey: ["history", id] })
+      } else {
+        toast.error(e.message)
+      }
+    },
   })
   if (projects.isPending) return <p>正在加载项目…</p>
   if (projects.error)
@@ -478,16 +516,36 @@ export function ProjectDetail({ id }: { id: string }) {
         <Link to="/projects">返回项目列表</Link>
       </div>
     )
+  const base = baseRevision ?? project.revision
+  const values = {
+    status_note: draft?.status_note ?? project.status_note,
+    next_step: draft?.next_step ?? project.next_step,
+    stage: draft?.stage ?? project.stage,
+  }
+  const dirty =
+    draft !== null &&
+    (draft.status_note !== project.status_note ||
+      draft.next_step !== project.next_step ||
+      draft.stage !== project.stage)
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!project) return
-    const data = new FormData(e.currentTarget)
     save.mutate({
-      ...project,
-      stage: data.get("stage"),
-      status_note: data.get("status_note"),
-      next_step: data.get("next_step"),
+      name: project.name,
+      description: project.description,
+      revision: base,
+      ...values,
     })
+  }
+  function adoptLatest() {
+    if (
+      !draft ||
+      window.confirm("采用最新内容会丢弃当前未保存的草稿，确定继续吗？")
+    ) {
+      setDraft(null)
+      setBaseRevision(project!.revision)
+      setConflict(false)
+    }
   }
   return (
     <div className="space-y-7">
@@ -641,16 +699,42 @@ export function ProjectDetail({ id }: { id: string }) {
         <p className="mb-5 text-xs text-muted-foreground">
           保存时校验修订版本，避免覆盖另一处刚更新的进展。
         </p>
-        <form
-          key={project.revision}
-          onSubmit={submit}
-          className="grid gap-5 md:grid-cols-2"
-        >
+        {conflict && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/40"
+          >
+            <p className="flex items-center gap-2 font-medium">
+              <TriangleAlert size={16} className="text-amber-600" />
+              另一处已更新到修订 {project.revision}，你的草稿仍保留在下方。
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              当前草稿基于修订 {base}
+              。查看最新内容后，可以放弃草稿采用最新版本再编辑，或直接保存覆盖。
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => projects.refetch()}
+              >
+                查看最新版本
+              </Button>
+              {project.revision !== base && (
+                <Button variant="outline" size="sm" onClick={adoptLatest}>
+                  采用最新内容（丢弃草稿）
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+        <form onSubmit={submit} className="grid gap-5 md:grid-cols-2">
           <label className="block text-sm md:col-span-2">
             当前进展
             <textarea
               name="status_note"
-              defaultValue={project.status_note}
+              value={values.status_note}
+              onChange={(e) => edit({ ...values, status_note: e.target.value })}
               maxLength={10000}
               rows={5}
               className={`${inputStyle} mt-2`}
@@ -662,7 +746,8 @@ export function ProjectDetail({ id }: { id: string }) {
             <Input
               id="project-next-step"
               name="next_step"
-              defaultValue={project.next_step}
+              value={values.next_step}
+              onChange={(e) => edit({ ...values, next_step: e.target.value })}
               maxLength={2000}
               className="mt-2"
             />
@@ -671,7 +756,8 @@ export function ProjectDetail({ id }: { id: string }) {
             研究阶段
             <select
               name="stage"
-              defaultValue={project.stage}
+              value={values.stage}
+              onChange={(e) => edit({ ...values, stage: e.target.value })}
               className={`${inputStyle} mt-2`}
             >
               {Object.entries(stages).map(([key, label]) => (
@@ -683,7 +769,8 @@ export function ProjectDetail({ id }: { id: string }) {
           </label>
           <div className="flex items-center justify-between md:col-span-2">
             <span className="text-xs text-muted-foreground">
-              修订 {project.revision} · {date(project.updated_at)}
+              {dirty ? `草稿基于修订 ${base} · ` : ""}当前修订{" "}
+              {project.revision} · {date(project.updated_at)}
             </span>
             <Button type="submit" disabled={save.isPending}>
               {save.isPending ? "保存中…" : "保存进展"}
@@ -691,6 +778,7 @@ export function ProjectDetail({ id }: { id: string }) {
           </div>
         </form>
       </section>
+      <HistoryPanel projectId={id} />
     </div>
   )
 }

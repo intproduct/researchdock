@@ -6,13 +6,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
-from sqlalchemy import DateTime, UniqueConstraint
+from sqlalchemy import JSON, DateTime, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.models import get_datetime_utc
 
 Stage = Literal["exploring", "active", "writing", "paused", "archived"]
 Comparison = Literal["synced", "ahead", "behind", "diverged", "unknown", "unrelated"]
+RevisionOrigin = Literal["created", "updated", "migrated_baseline"]
 
 
 class Project(SQLModel, table=True):
@@ -49,6 +50,54 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(ProjectCreate):
     status_note: str = Field(default="", max_length=10000)
     revision: int = Field(ge=1)
+
+
+class ProjectSnapshot(BaseModel):
+    """Trusted server-side copy of the editable project state."""
+
+    name: str = Field(max_length=120)
+    description: str = Field(default="", max_length=2000)
+    stage: str = Field(default="exploring", max_length=20)
+    status_note: str = Field(default="", max_length=10000)
+    next_step: str = Field(default="", max_length=2000)
+
+
+class ProjectRevision(SQLModel, table=True):
+    __tablename__ = "projectrevision"
+    __table_args__ = (
+        UniqueConstraint("project_id", "revision", name="uq_project_revision"),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", ondelete="CASCADE", index=True
+    )
+    revision: int = Field(ge=1)
+    snapshot: ProjectSnapshot = Field(sa_type=JSON)
+    actor_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    origin: str = Field(max_length=20)
+    recorded_at: datetime = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )
+    project_updated_at: datetime = Field(sa_type=DateTime(timezone=True))
+
+
+class ProjectRevisionPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    project_id: uuid.UUID
+    revision: int
+    snapshot: ProjectSnapshot
+    actor_id: uuid.UUID | None
+    origin: RevisionOrigin
+    recorded_at: datetime
+    project_updated_at: datetime
+
+
+class ProjectHistoryPage(BaseModel):
+    items: list[ProjectRevisionPublic]
+    next_before_revision: int | None
 
 
 class Device(SQLModel, table=True):

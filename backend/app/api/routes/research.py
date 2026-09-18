@@ -3,7 +3,7 @@ import secrets
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -18,6 +18,10 @@ from app.research_models import (
     Observation,
     Project,
     ProjectCreate,
+    ProjectHistoryPage,
+    ProjectRevision,
+    ProjectRevisionPublic,
+    ProjectSnapshot,
     ProjectUpdate,
     WorkingCopy,
 )
@@ -30,6 +34,29 @@ def require_project(session, project_id: uuid.UUID, owner_id: uuid.UUID) -> Proj
     if not project or project.owner_id != owner_id:
         raise HTTPException(404, "项目不存在")
     return project
+
+
+def record_revision(
+    session,
+    *,
+    project_id: uuid.UUID,
+    revision: int,
+    content: ProjectSnapshot,
+    actor_id: uuid.UUID | None,
+    origin: str,
+    project_updated_at,
+) -> None:
+    """Stage a snapshot in the caller's transaction; never commits on its own."""
+    session.add(
+        ProjectRevision(
+            project_id=project_id,
+            revision=revision,
+            snapshot=content.model_dump(),
+            actor_id=actor_id,
+            origin=origin,
+            project_updated_at=project_updated_at,
+        )
+    )
 
 
 def get_device(session: SessionDep, token: TokenDep) -> Device:
@@ -66,6 +93,22 @@ def all_copies(session: SessionDep, user: CurrentUser):
 def create_project(body: ProjectCreate, session: SessionDep, user: CurrentUser):
     project = Project(**body.model_dump(), owner_id=user.id)
     session.add(project)
+    session.flush()
+    record_revision(
+        session,
+        project_id=project.id,
+        revision=project.revision,
+        content=ProjectSnapshot(
+            name=project.name,
+            description=project.description,
+            stage=project.stage,
+            status_note=project.status_note,
+            next_step=project.next_step,
+        ),
+        actor_id=user.id,
+        origin="created",
+        project_updated_at=project.updated_at,
+    )
     session.commit()
     session.refresh(project)
     return project
@@ -76,6 +119,7 @@ def edit_project(
     project_id: uuid.UUID, body: ProjectUpdate, session: SessionDep, user: CurrentUser
 ):
     require_project(session, project_id, user.id)
+    updated_at = get_datetime_utc()
     result = session.execute(
         update(Project)
         .where(
@@ -86,14 +130,54 @@ def edit_project(
         .values(
             **body.model_dump(exclude={"revision"}),
             revision=body.revision + 1,
-            updated_at=get_datetime_utc(),
+            updated_at=updated_at,
         )
     )
     if result.rowcount != 1:
         session.rollback()
         raise HTTPException(409, "项目已被更新，请刷新后再保存")
+    # Snapshot comes from the validated request body, not the identity map, so
+    # a stale in-session Project object can never be mistaken for new data.
+    record_revision(
+        session,
+        project_id=project_id,
+        revision=body.revision + 1,
+        content=ProjectSnapshot(
+            name=body.name,
+            description=body.description,
+            stage=body.stage,
+            status_note=body.status_note,
+            next_step=body.next_step,
+        ),
+        actor_id=user.id,
+        origin="updated",
+        project_updated_at=updated_at,
+    )
     session.commit()
     return session.get(Project, project_id)
+
+
+@router.get("/projects/{project_id}/history", response_model=ProjectHistoryPage)
+def project_history(
+    project_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    before_revision: Annotated[int | None, Query(ge=1)] = None,
+):
+    require_project(session, project_id, user.id)
+    statement = (
+        select(ProjectRevision)
+        .where(ProjectRevision.project_id == project_id)
+        .order_by(ProjectRevision.revision.desc())
+        .limit(limit + 1)
+    )
+    if before_revision is not None:
+        statement = statement.where(ProjectRevision.revision < before_revision)
+    rows = session.exec(statement).all()
+    items = [ProjectRevisionPublic.model_validate(row) for row in rows[:limit]]
+    next_before = items[-1].revision if len(rows) > limit else None
+    return ProjectHistoryPage(items=items, next_before_revision=next_before)
 
 
 @router.get("/projects/{project_id}/copies", response_model=list[WorkingCopy])

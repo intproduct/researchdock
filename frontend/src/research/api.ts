@@ -16,6 +16,28 @@ export interface Device {
   revoked: boolean
   last_seen: string | null
 }
+export interface ProjectSnapshot {
+  name: string
+  description: string
+  stage: string
+  status_note: string
+  next_step: string
+}
+export type RevisionOrigin = "created" | "updated" | "migrated_baseline"
+export interface ProjectRevision {
+  id: string
+  project_id: string
+  revision: number
+  snapshot: ProjectSnapshot
+  actor_id: string | null
+  origin: RevisionOrigin
+  recorded_at: string
+  project_updated_at: string
+}
+export interface ProjectHistoryPage {
+  items: ProjectRevision[]
+  next_before_revision: number | null
+}
 export interface WorkingCopy {
   id: string
   project_id: string
@@ -35,29 +57,52 @@ export interface WorkingCopy {
   observed_at: string | null
   received_at: string | null
 }
+/** Carries the HTTP status so callers branch on 409/404 instead of wording. */
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+  }
+}
+export function isApiError(error: unknown, status?: number) {
+  return (
+    error instanceof ApiError &&
+    (status === undefined || error.status === status)
+  )
+}
 export async function api<T>(
   path: string,
   body?: unknown,
   method?: string,
 ): Promise<T> {
-  const res = await fetch(
-    `${import.meta.env.VITE_API_URL ?? ""}/api/v1${path}`,
-    {
+  let res: Response
+  try {
+    res = await fetch(`${import.meta.env.VITE_API_URL ?? ""}/api/v1${path}`, {
       method: method ?? (body === undefined ? "GET" : "POST"),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${localStorage.getItem("access_token") ?? ""}`,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    },
-  )
+    })
+  } catch {
+    throw new ApiError(0, "网络连接失败，草稿仍保留在本页，请稍后重试")
+  }
   if (res.status === 401) {
     localStorage.removeItem("access_token")
     window.location.assign("/login")
   }
-  const data = await res.json()
+  let data: { detail?: unknown } = {}
+  try {
+    data = await res.json()
+  } catch {
+    data = {}
+  }
   if (!res.ok)
-    throw new Error(
+    throw new ApiError(
+      res.status,
       typeof data.detail === "string"
         ? data.detail
         : "请求未完成，请检查输入或稍后重试",
