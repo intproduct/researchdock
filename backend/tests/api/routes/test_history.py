@@ -1,10 +1,26 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 import pytest
 from sqlmodel import select
 
 from app.research_models import Project, ProjectRevision
+
+
+def _assert_utc(text: str) -> None:
+    """A timestamp must carry an explicit UTC offset, not be tz-naive."""
+    assert text.endswith(("Z", "+00:00")), text
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None and parsed.utcoffset() == UTC.utcoffset(
+        None
+    ), text
+
+
+def _instant(text: str) -> datetime:
+    """Parse an API timestamp; a naive value is the UTC wall clock."""
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def create_project(client, headers, name="量子动力学"):
@@ -48,7 +64,9 @@ def test_create_records_single_created_snapshot(
         "status_note": p["status_note"],
         "next_step": p["next_step"],
     }
-    assert item["project_updated_at"] == p["updated_at"]
+    # Same instant as the project's own updated_at (compare instants: the
+    # project response is still naive UTC, the history response is explicit).
+    assert _instant(item["project_updated_at"]) == _instant(p["updated_at"])
     assert item["recorded_at"]
     # actor_id is the server-side user id, never an email or token
     owner = db.get(Project, uuid.UUID(p["id"]))
@@ -83,7 +101,9 @@ def test_updates_append_descending_history_and_409_adds_nothing(
     ]
     assert page["items"][0]["snapshot"]["status_note"] == "扩大样本"
     assert page["items"][1]["snapshot"]["status_note"] == "完成基线"
-    assert page["items"][0]["project_updated_at"] == second.json()["updated_at"]
+    assert _instant(page["items"][0]["project_updated_at"]) == _instant(
+        second.json()["updated_at"]
+    )
 
 
 def test_same_content_put_still_appends_revision(client, superuser_token_headers):
@@ -251,4 +271,55 @@ def test_history_pagination(client, superuser_token_headers):
             client, superuser_token_headers, p["id"], before_revision=0
         ).status_code
         == 422
+    )
+
+
+def test_history_timestamps_carry_utc_for_every_origin(
+    client, db, superuser_token_headers
+):
+    """R2: recorded_at / project_updated_at must be explicit UTC over HTTP.
+
+    SQLite hands back naive datetimes for a plain DateTime column, so the API
+    boundary has to attach UTC rather than relying on the database driver.
+    """
+    p = create_project(client, superuser_token_headers)
+    updated = update_project(
+        client, superuser_token_headers, p, status_note="第二轮"
+    )
+    assert updated.status_code == 200
+    # Simulate the migration backfill: a baseline row written with a naive
+    # UTC value, exactly as the SQLite migration produces it.
+    baseline = ProjectRevision(
+        project_id=uuid.UUID(p["id"]),
+        revision=99,
+        snapshot={
+            "name": "T",
+            "description": "",
+            "stage": "active",
+            "status_note": "迁移前",
+            "next_step": "",
+        },
+        actor_id=None,
+        origin="migrated_baseline",
+        project_updated_at=datetime(2026, 9, 15, 12, 0, 0),  # naive UTC
+    )
+    db.add(baseline)
+    db.commit()
+
+    page = history(client, superuser_token_headers, p["id"], limit=100).json()
+    origins = {item["origin"] for item in page["items"]}
+    assert origins == {"created", "updated", "migrated_baseline"}
+    for item in page["items"]:
+        _assert_utc(item["recorded_at"])
+        _assert_utc(item["project_updated_at"])
+    # Meaning is preserved: the naive 12:00 value is the UTC instant 12:00,
+    # not a re-interpretation in some other offset.
+    baseline_item = next(
+        item for item in page["items"] if item["origin"] == "migrated_baseline"
+    )
+    parsed = datetime.fromisoformat(
+        baseline_item["project_updated_at"].replace("Z", "+00:00")
+    )
+    assert parsed.astimezone(UTC).replace(tzinfo=None) == datetime(
+        2026, 9, 15, 12, 0, 0
     )

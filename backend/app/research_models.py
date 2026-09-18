@@ -1,7 +1,7 @@
 """Research metadata only; source code and working files remain on devices."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -93,6 +93,20 @@ class ProjectRevisionPublic(BaseModel):
     origin: RevisionOrigin
     recorded_at: datetime
     project_updated_at: datetime
+
+    @field_validator("recorded_at", "project_updated_at", mode="before")
+    @classmethod
+    def _as_utc(cls, value: datetime) -> datetime:
+        """Serialize history times as explicit UTC.
+
+        Columns are declared timezone-aware, but SQLite returns naive
+        datetimes holding the UTC wall clock. Stored values are UTC by
+        construction (get_datetime_utc and the migration), so a naive value
+        is labelled UTC rather than shifted; an aware value is converted.
+        """
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 class ProjectHistoryPage(BaseModel):

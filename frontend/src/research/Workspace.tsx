@@ -486,10 +486,26 @@ export function ProjectDetail({ id }: { id: string }) {
   }
   const save = useMutation({
     mutationFn: (body: unknown) => api<Project>(`/projects/${id}`, body, "PUT"),
-    onSuccess: (saved) => {
-      setDraft(null)
+    onSuccess: (saved, body) => {
+      // `body` is exactly what the server just saved. Only drop the draft if
+      // the user did not keep typing after this submit; text entered while the
+      // request was in flight was never sent, so it must survive (R1). Either
+      // way the base moves to the saved revision so the next PUT uses it.
+      const sent = body as {
+        status_note: string
+        next_step: string
+        stage: string
+      }
       setBaseRevision(saved.revision)
       setConflict(false)
+      setDraft((current) =>
+        current !== null &&
+        current.status_note === sent.status_note &&
+        current.next_step === sent.next_step &&
+        current.stage === sent.stage
+          ? null
+          : current,
+      )
       cache.invalidateQueries({ queryKey: ["projects"] })
       cache.invalidateQueries({ queryKey: ["history", id] })
       toast.success("研究进展已保存")
@@ -710,7 +726,7 @@ export function ProjectDetail({ id }: { id: string }) {
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               当前草稿基于修订 {base}
-              。查看最新内容后，可以放弃草稿采用最新版本再编辑，或直接保存覆盖。
+              ，不会直接覆盖对方内容。先查看最新版本；要继续编辑自己的草稿，请采用最新内容后再保存。
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
