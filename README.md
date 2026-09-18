@@ -75,3 +75,7 @@ git push -u origin main
 ```
 
 `.env`、本地密码、数据库、依赖目录与运行时状态均不入库。
+
+## 开发协作
+
+Claude Code（Kimi 后端）执行任务，Codex 负责契约和独立审计。入口见 [交接说明](docs/handoff/START_HERE.zh-CN.md)，Claude Code 自动入口为 [CLAUDE.md](CLAUDE.md)。先做 T01，审计整合后再做 T02；本轮仅新增交接文档，尚未实施这两项功能。

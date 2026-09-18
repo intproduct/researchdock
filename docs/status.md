@@ -26,3 +26,9 @@ v0.1 本地可运行的最小完整流程：登录 → 创建项目 → 配对�
 6. 非 Git 目录导入、DVC、MLflow、Zotero 为后续独立接入项。
 
 根目录 .env、credentials.local.txt、开发数据库和 runtime 下的验收记录都不提交。示例项目用于展示验收结果，验收设备在交付前撤销。首次 Git 提交不配置任何远端。
+
+## 协作交接 · 2026-09-19
+
+用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。实现基线为 2a0d8eb；交接入口见 [START_HERE](handoff/START_HERE.zh-CN.md)。T01（研究修订历史）ready；T02（PostgreSQL/Compose/恢复）等待 T01 审计整合。两项均尚未实施，不改变上面的功能和验证状态。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
+
+交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。

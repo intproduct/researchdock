@@ -11,3 +11,9 @@
 - Migrations are explicit Alembic revisions. Do not run schema migration during read requests. SQLite is for local development; PostgreSQL is the deployment target.
 - Use `python -m pytest backend/tests agent/tests -q`, `npm --prefix frontend run build`, and targeted static checks for relevant changes. Run tests against isolated databases and temporary Git repositories, never the user's active worktrees.
 - Update README/docs/status.md for changes to startup, scope or known limitations. Do not record passwords or tokens in documentation.
+
+## Implementation and review handoff
+
+- For the user-approved Claude Code/Kimi implementation and Codex review workflow, read docs/handoff/START_HERE.zh-CN.md and the selected task card.
+- T01 is the first implementation task. T02 starts after T01 is independently accepted and locally integrated. Later roadmap items are not automatically authorized for implementation.
+- Record actual base/head commits and verification evidence; implementation reports do not constitute independent acceptance.
