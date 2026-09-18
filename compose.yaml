@@ -1,0 +1,52 @@
+name: research-manager
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: research
+      POSTGRES_USER: research
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research -d research"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://research:${POSTGRES_PASSWORD}@db:5432/research
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "python -m alembic upgrade head && python -m app.initial_data"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://research:${POSTGRES_PASSWORD}@db:5432/research
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:${PUBLIC_PORT:-8080}:80"
+    depends_on: [backend]
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
