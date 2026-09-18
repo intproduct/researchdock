@@ -33,6 +33,6 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 协作交接 · 2026-09-19
 
-用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01（研究修订历史）实现已完成并提交在分支 `codex/task-01-history`，报告见 [T01-implementation](handoff/reports/T01-implementation.md)，状态 `ready_for_review`，**尚未**独立审计。T02（PostgreSQL/Compose/恢复）等待 T01 审计整合。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
+用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01（研究修订历史）实现已完成并提交在分支 `codex/task-01-history`，报告见 [T01-implementation](handoff/reports/T01-implementation.md)，独立审计结论为 `changes_requested`，见 [T01-review](handoff/reports/T01-review.md)。78 项测试及前端构建通过，但保存期间继续输入会丢失草稿、历史 API 时间缺少 UTC 标记，需修复后复审。T02（PostgreSQL/Compose/恢复）等待 T01 审计通过并整合。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
 
 交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。
