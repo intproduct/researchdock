@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   Unplug,
 } from "lucide-react"
-import { type FormEvent, type ReactNode, useId, useState } from "react"
+import { type FormEvent, type ReactNode, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -448,9 +448,32 @@ export function Workspace({ listing = false }: { listing?: boolean }) {
 
 export function ProjectDetail({ id }: { id: string }) {
   const cache = useQueryClient()
+  // The newest revision this client is certain of: the larger of the rendered
+  // project and any successful PUT we have applied. A list refetch that
+  // resolves with an older revision (started before the save) must be ignored,
+  // otherwise it rolls the form back to pre-save content (round-2 R1).
+  const floorRevision = useRef(0)
+  const floorFor = useRef<string | null>(null)
+  // A project switch reuses this component; never carry one project's floor
+  // into another, or a high floor would mask the new project's edits.
+  if (floorFor.current !== id) {
+    floorFor.current = id
+    floorRevision.current = 0
+  }
   const projects = useQuery({
     queryKey: ["projects"],
-    queryFn: () => api<Project[]>("/projects"),
+    queryFn: async () => {
+      const fresh = await api<Project[]>("/projects")
+      const stale = fresh.find(
+        (p) => p.id === id && p.revision < floorRevision.current,
+      )
+      if (!stale) return fresh
+      // Keep the locally applied newer state for this project.
+      const cached = cache.getQueryData<Project[]>(["projects"])
+      if (!cached) return fresh
+      const known = cached.find((p) => p.id === id)
+      return known ? fresh.map((p) => (p.id === id ? known : p)) : fresh
+    },
   })
   const copies = useQuery({
     queryKey: ["copies", id],
@@ -463,6 +486,10 @@ export function ProjectDetail({ id }: { id: string }) {
     refetchInterval: 30_000,
   })
   const project = projects.data?.find((p) => p.id === id)
+  floorRevision.current = Math.max(
+    floorRevision.current,
+    project?.revision ?? 0,
+  )
   // Draft state is owned here, not by the query cache: background refetches
   // must never overwrite what the user is typing. `draft` is null until the
   // user first edits, then holds their text; `baseRevision` pins the revision
@@ -498,6 +525,14 @@ export function ProjectDetail({ id }: { id: string }) {
       }
       setBaseRevision(saved.revision)
       setConflict(false)
+      // Apply the saved state to the list cache BEFORE clearing the draft.
+      // Otherwise the form would fall back to the stale cached project while
+      // the list refetch is still in flight, and a follow-up save would push
+      // old fields with the new revision (round-2 R1).
+      floorRevision.current = saved.revision
+      cache.setQueryData<Project[]>(["projects"], (current) =>
+        (current ?? []).map((p) => (p.id === saved.id ? saved : p)),
+      )
       setDraft((current) =>
         current !== null &&
         current.status_note === sent.status_note &&
@@ -506,8 +541,10 @@ export function ProjectDetail({ id }: { id: string }) {
           ? null
           : current,
       )
-      cache.invalidateQueries({ queryKey: ["projects"] })
       cache.invalidateQueries({ queryKey: ["history", id] })
+      // Reconcile the list in the background; a refetch that resolves to an
+      // older revision than we just saved is ignored below in queryFn.
+      projects.refetch()
       toast.success("研究进展已保存")
     },
     onError: (e: Error) => {
@@ -726,7 +763,7 @@ export function ProjectDetail({ id }: { id: string }) {
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               当前草稿基于修订 {base}
-              ，不会直接覆盖对方内容。先查看最新版本；要继续编辑自己的草稿，请采用最新内容后再保存。
+              ，不会直接覆盖对方内容。先查看最新版本；要在此基础上继续，请采用最新内容（会丢弃当前草稿）后重新编辑并保存。
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
