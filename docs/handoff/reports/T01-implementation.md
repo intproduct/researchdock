@@ -1,11 +1,12 @@
 # T01 实现报告
 
-- 状态：ready_for_review（首轮审计 changes_requested，R1/R2/C1/C2 已修复，等待复审）
+- 状态：ready_for_review（首轮 changes_requested 的 R1/R2/C1/C2 已修复；第二轮 changes_requested 的 R1 续项已修复，等待第三轮复审）
 - 任务卡：docs/handoff/TASK-01-history.zh-CN.md
 - 分支：codex/task-01-history
 - 实际 base SHA：7e4c4a0828045547c373c8f47a39ec8ac10beafb
-- 最后代码提交 SHA（此报告提交之前）：006902a8bf9daff87638a2053678972583fcd561
-- 被审计过的实现提交（首轮）：36983911599dc87c08329617ed4ad1e72e79ab0a；被审计交付 HEAD：c78495007ea85a684c9d08812654da79cd2978a1
+- 最后代码提交 SHA（此报告提交之前）：6712ded8c94825b26ecb52fdaf62c61ddc084d9d
+- 首轮被审计交付 HEAD：c78495007ea85a684c9d08812654da79cd2978a1（对应审计 T01-review.md）
+- 第二轮被审计交付 HEAD：a9e6d12fed458478ec6e13d775ff0423dc688473（对应审计 T01-review-round2.md）
 - 执行平台/解释器/Node/数据库版本：Windows 11 / Python 3.14 / Node 26.5 / SQLite（开发与隔离测试），PostgreSQL 未执行
 - 实际模型与服务来源（不知道写 unknown）：Kimi 后端（用户配置的 Claude Code 会话），其余 unknown
 
@@ -49,7 +50,8 @@
 
 - 可重复脚本 `runtime/verify_t01_browser.mjs`（Playwright + 本机 Chrome，隔离后端 :8011 + 隔离前端 :5183 + 独立 SQLite）：用 `page.route` 延迟项目 PUT 响应，提交 `R1_SENT` 后在“保存中…”期间键入 `R1_TYPED_WHILE_SAVING`，放行响应。结果：保存成功后输入框仍为 `R1_TYPED_WHILE_SAVING`；随后在该草稿上再次保存成功（走新基线）。
 - 判别性验证：把 Workspace.tsx 换回被审计提交 3698391 的版本重跑同一脚本，得到与审计一致的现象——输入框从 `R1_TYPED_WHILE_SAVING` 回退为 `R1_SENT`（新输入丢失）；换回修复版后恢复通过。证明该脚本确实能捕获 R1，而非恒真断言。
-- 原有 409/网络失败保留草稿行为仍成立：同一脚本的两个会话冲突流程通过（409 后草稿保留、采用最新后保存成功）。
+- 原有 409 保留草稿行为的回归仍成立：同一脚本的两个会话冲突流程通过（409 后草稿保留、采用最新后保存成功）。
+- 网络失败保留草稿未单独端到端验证，标为未验证，见“阻塞和未解决事项”。
 
 ### R2 · P2：历史 API 时间字段缺少 UTC 标记 —— 已修复
 
@@ -71,11 +73,38 @@
 
 ### C1 · 非阻断：无依据的“直接保存覆盖”提示 —— 已修复
 
-Workspace.tsx 冲突提示原文“可以……或直接保存覆盖”不成立：旧基线再次提交仍返回 409。已改为“当前草稿基于修订 N，不会直接覆盖对方内容。先查看最新版本；要继续编辑自己的草稿，请采用最新内容后再保存。”未为匹配文案新增覆盖功能。
+Workspace.tsx 冲突提示原文“可以……或直接保存覆盖”不成立：旧基线再次提交仍返回 409。已改为不承诺覆盖。第二轮审计又指出“继续编辑自己的草稿，请采用最新内容后再保存”仍不准确（采用最新会丢弃草稿），本轮一并改为“要在此基础上继续，请采用最新内容（会丢弃当前草稿）后重新编辑并保存”。未为匹配文案新增覆盖功能。
 
 ### C2 · 非阻断：architecture.md 范围描述过期 —— 已修复
 
 docs/architecture.md 原先写“does not yet preserve a full revision history”。已改为明确区分：已交付的是可编辑项目字段的状态快照历史（含无 undo/restore、diff、自由研究日志的说明），完整研究记忆与溯源知识编译仍为 planned separately。
+
+## 第二轮审计问题回应
+
+第二轮审计报告：docs/handoff/reports/T01-review-round2.md（结论 changes_requested，剩余 1 项 P1）。修复提交：6712ded（追加，未 squash）。
+
+### R1 续项 · P1：慢刷新期间用旧缓存内容 + 新 revision 覆盖刚保存的状态 —— 已修复
+
+原因（审计复现）：PUT 成功后 `setDraft(null)` 且 `baseRevision=saved.revision`，但 `project` 仍来自尚未刷新完的列表缓存；表单回退为缓存中的旧内容、修订号却已前进，再次保存把旧字段和新 revision 一起提交，后端接受并覆盖刚保存的进展。
+
+修复（frontend/src/research/Workspace.tsx，ProjectDetail，不改 API 同内容仍递增 revision 的契约）：
+
+1. `save.onSuccess` 在清空已提交草稿之前，先用 PUT 返回的 `saved` 对象 `cache.setQueryData(["projects"], …)` 更新列表缓存：把该 id 的项目替换为 saved。这样即使列表 GET 尚未返回，表单也始终显示刚保存的内容，而不是回退到旧缓存。
+2. 新增按项目隔离的 `floorRevision`（`useRef`，随渲染取“渲染出的 project.revision 与已保存 revision 的较大者”，切换项目时重置，避免把一个项目的下限带进另一个项目）。
+3. 列表 `queryFn` 获取结果后，若其中当前项目的 revision 小于 `floorRevision`（说明该 GET 在本次保存前发出、数据偏旧），则保留本地已应用的较新状态、不覆盖，直接返回修正后的列表；其余项目照常更新。
+4. 保存后仍后台 `refetch()` 列表以对账，但已被上述下限保护，不会把表单拉回保存前。
+
+回归验证（runtime/verify_t01_round3.mjs，Playwright + 本机 Chrome，隔离后端 :8011/前端 :5183/独立 SQLite）：
+
+1. 保存一次使项目稳定在 revision=2（内容 `R3_STEP1`）。
+2. 用 `page.route` 暂缓列表 `GET /projects`（仅第一个，PUT 与历史 GET 正常），把进展改为 `R3_COMMITTED_WITH_SLOW_REFRESH` 并保存，期间不再输入。
+3. PUT 成功产生 revision=3，但列表 GET 仍在等待。此时输入框保持 `R3_COMMITTED_WITH_SLOW_REFRESH`，界面显示“当前修订 3”——没有回退。
+4. 不修改输入框，再次保存成功。独立 HTTP 读取历史确认为 revision 3、4 均为 `R3_COMMITTED_WITH_SLOW_REFRESH`，revision 2 为 `R3_STEP1`，没有任何旧内容被回写。
+5. 放行列表 GET，界面仍一致。
+6. 判别性对照：把 Workspace.tsx 换回第二轮被审计提交 a9e6d12 的版本重跑同一脚本，输入框在慢刷新期间回退为 `R3_STEP1`、修订显示 2（复现 R1 续项）；换回修复版后恢复通过。证明该脚本有判别力。
+7. 首轮 R1（保存期间继续输入）与 409 冲突保留草稿回归：重跑 runtime/verify_t01_browser.mjs 全部通过，未回归。
+
+未改变：API 相同内容 PUT 仍递增 revision（见历史 revision 2→3→4，内容为重复值也正常落库）；409 保留草稿；后台刷新不覆盖草稿。
 
 ## 契约核对
 
@@ -88,7 +117,8 @@ docs/architecture.md 原先写“does not yet preserve a full revision history�
 | 外账户/匿名/设备凭据权限隔离，伪造 actor 不生效，非法分页参数被拒绝 | 通过 | test_history_permissions_and_forged_fields |
 | 分页无重复遗漏；加载下一页期间新增 revision 不破坏向旧版本翻页 | 通过 | test_history_pagination |
 | 已有 revision>1 项目迁移仅产生当前基线；二次 upgrade 幂等；隔离库 upgrade/downgrade/upgrade | 通过 | test_migration_history.py（4 项）+ 开发库副本 upgrade 仅补一条基线 |
-| 两会话冲突、背景刷新、网络失败均保留草稿；明确采用最新后能正常保存 | 通过（本轮重跑） | runtime/verify_t01_browser.mjs：冲突保留草稿、采用最新、再保存成功、无 pageerror |
+| 两会话冲突、背景刷新保留草稿；明确采用最新后能正常保存 | 通过（本轮重跑） | runtime/verify_t01_browser.mjs：冲突保留草稿、采用最新、再保存成功、无 pageerror |
+| 网络失败保留草稿 | 未执行 | 未对真实断网做端到端确认；仅代码路径核实（api() 捕获 fetch 异常抛 ApiError(0)，非 409 分支不动草稿），见“阻塞和未解决事项” |
 | 保存期间继续输入不丢失，后续保存使用正确基线（审计 R1 验收） | 通过 | runtime/verify_t01_browser.mjs 延迟 PUT；对照旧代码可复现丢失 |
 | 历史响应两个时间字段均带 UTC，且保留正确时间含义（审计 R2 验收） | 通过 | test_history_timestamps_carry_utc_for_every_origin；真实 HTTP 响应含 `Z` |
 | 原 66 项回归仍通过，新测试有实质断言；前端生产构建通过 | 通过 | 全套 79 passed；npm build 成功 |
@@ -107,6 +137,8 @@ docs/architecture.md 原先写“does not yet preserve a full revision history�
 | 隔离后端（uvicorn :8011，独立 SQLite）+ 前端（vite :5183）+ `runtime/verify_t01_browser.mjs` | 隔离库 + 本机 Chrome | 0 | R1 保留新输入、后续保存成功、409 保留草稿、采用最新后保存成功、无 pageerror |
 | 对照实验：同一脚本跑被审计提交 3698391 的 Workspace.tsx | 同上 | — | 输入框回退为 `R1_SENT`，复现 R1；证明回归脚本有判别力 |
 | 真实 HTTP 时间字段抽查（python urllib 请求 :8011 历史接口） | 隔离 SQLite | 0 | 三种 origin 两字段均为 `...Z` |
+| 隔离后端 + 前端 + `runtime/verify_t01_round3.mjs`（慢 GET 回归，第二轮） | 隔离库 + 本机 Chrome | 0 | 慢列表 GET 期间表单保持刚保存内容与修订 3，再保存不回写旧内容，放行后一致，无 pageerror；HTTP 历史确认 rev3/4 为新内容、无旧内容回写 |
+| 对照实验：同一脚本跑第二轮被审计提交 a9e6d12 的 Workspace.tsx | 同上 | — | 慢刷新期间输入框回退为 `R3_STEP1`、修订显示 2，复现 R1 续项；证明回归脚本有判别力 |
 
 UI 操作步骤及可观察结果（R1 复现，与审计报告步骤一致）：
 
@@ -116,6 +148,14 @@ UI 操作步骤及可观察结果（R1 复现，与审计报告步骤一致）�
 4. 放行响应、提示“研究进展已保存”后，输入框仍显示 `R1_TYPED_WHILE_SAVING`（修复前会变回 `R1_SENT`）。
 5. 再次保存成功；随后两会话冲突流程仍保留草稿并能采用最新后保存。截图 runtime/tmp/t01-regression.png。
 6. 可重复方式：先在隔离端口起后端（8011）与前端（5183），再执行 `node runtime/verify_t01_browser.mjs`；脚本内模块需从 frontend 目录解析，实际执行时从 `frontend/` 下运行同一文件。
+
+慢刷新回归（第二轮 R1 续项）步骤及可观察结果：
+
+1. 新建“R3 慢刷新项目”→ 保存一次，项目稳定在 revision=2，内容 `R3_STEP1`。
+2. 测试脚本用 `page.route` 暂缓第一次列表 `GET /projects`（PUT 与历史 GET 正常放行），把进展改为 `R3_COMMITTED_WITH_SLOW_REFRESH` 并保存（期间不再输入）。
+3. PUT 成功产生 revision=3、列表 GET 仍被阻塞时：输入框仍为 `R3_COMMITTED_WITH_SLOW_REFRESH`，界面显示“当前修订 3”（修复前会回退为 `R3_STEP1`/修订 2）。
+4. 不修改输入框再次点击保存 → 成功；HTTP 历史确认为 rev 3、4 均为新内容，没有旧内容被回写。
+5. 放行列表 GET → 界面保持一致。截图 runtime/tmp/r3-slow-refresh.png。执行方式同第 6 条，脚本为 `runtime/verify_t01_round3.mjs`。
 
 迁移/恢复验证：在临时目录新建 4 个独立 SQLite 文件，分别执行 `upgrade head`（空库）、`upgrade head` 两次（幂等）、`upgrade head` → `downgrade d42026f707b5` → `upgrade head`（恢复基线）、`upgrade head` 后核对表结构与模型元数据一致；另对开发库 research.db 的副本（runtime/tmp/devcopy.db）执行 upgrade，仅补一条 revision=2 的 migrated_baseline，不伪造缺失版本。**没有真实 PostgreSQL，未执行容器化迁移**，该项交由 T02。
 
@@ -132,7 +172,7 @@ UI 操作步骤及可观察结果（R1 复现，与审计报告步骤一致）�
 ## 阻塞和未解决事项
 
 - 环境缺口（与代码无关，首轮已记录）：本机 `C:\Users\QXFang\AppData\Local\Temp\pytest-of-QXFang` 为无权限的陈旧目录，导致 pytest 默认临时目录不可用；测试用 `--basetemp` 指向仓库内可写目录绕过。所有用例均已实际运行，无 skip。
-- 范围外：真实 PostgreSQL 迁移与容器启动属 T02，本机 Docker daemon 未启动，未执行。
+- 范围外：真实 PostgreSQL 迁移与容器启动属 T02。第二轮审计更正：用户已启动 Docker，环境具备 Docker Engine 29.3.1 与 Compose v5.1.1（此前“Docker 未启动”的表述已过时，本报告据此更新）。环境具备不代表 T02 的应用容器、迁移与恢复验证已通过。
 - 浏览器验证使用本机已安装 Chrome（channel=chrome）；未下载 Playwright 自带浏览器。
 - 前端无单元测试框架（无 vitest/jest、无 playwright 配置）；本包按仓库现状以可重复脚本 + 真实浏览器验证，未为 T01 引入测试框架（属扩大范围）。若审计认为需要常驻前端回归，建议单列任务引入 Playwright 项目配置。
 - 首轮审计提到“网络失败场景未完成最终结果确认”。本次仍未对真实断网做端到端确认；代码路径为 `api()` 捕获 fetch 异常后抛 ApiError(0)，onError 非 409 分支只弹 toast、不动草稿。该结论来自代码阅读，未用真实断网复现，标为未验证。
@@ -146,11 +186,11 @@ UI 操作步骤及可观察结果（R1 复现，与审计报告步骤一致）�
 | 输出 | unknown | tokens |
 | 推理 | unknown | tokens；与输出是否重叠需说明：unknown |
 | 实际费用或套餐用量 | unknown | 原币种/额度、计费来源、日期 |
-| 修复轮数 | 1 | 轮；首轮审计 changes_requested（R1、R2 两项阻断）后一次追加提交修复 |
-| 人类介入 | 1 | 次；用户转交审计报告并指示按报告修复 |
+| 修复轮数 | 2 | 轮；首轮 changes_requested（R1、R2 两项阻断）→ 修复提交 006902a；第二轮 changes_requested（R1 续项 1 项阻断）→ 修复提交 6712ded |
+| 人类介入 | 2 | 次；用户两次转交审计报告并指示按报告修复 |
 
 ## 交接
 
-- 已完成首轮审计问题修复；请按 REVIEW_PROTOCOL 做第二轮独立复审。不要把首轮审计结论套用到新提交。
+- 已完成两轮审计问题修复（首轮 R1/R2/C1/C2、第二轮 R1 续项）；请按 REVIEW_PROTOCOL 对第二轮后的新代码做独立复审。不要把旧审计结论套用到新提交。
 - 最终回复中提供包含本报告的 HEAD SHA。
 - 下一任务：等待复审；不要自行写 accepted，不整合 main，不启动 T02。
