@@ -21,7 +21,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 未验收与下一步
 
-1. Docker daemon 在当前电脑未启动；真实 PostgreSQL、容器启动、HTTPS、云端部署及备份恢复待验收。不得宣称已经部署到云端。T01 的 PostgreSQL 迁移验证交由 T02。
+1. Docker 已启动，已确认 Linux 引擎及 Compose 可用；真实 PostgreSQL、应用容器启动、HTTPS、云端部署及备份恢复仍待验收。不得宣称已经部署到云端。T01 的 PostgreSQL 迁移验证交由 T02。
 2. 历史只保存“项目状态快照”，不是完整研究日志：无撤销/恢复版本、diff 算法、全文搜索、单条详情 API，也不承诺数据库管理员无法篡改。
 3. GitHub App/OAuth、远端刷新、跨设备祖先关系比较尚未实现。当前关系仅相对于本机缓存的 upstream，不是不同机器的直接对比。
 4. 没有自动同步、合并或上传代码。下一阶段先做同步计划与人工可审查的差异，再考虑受控写入。
@@ -33,6 +33,6 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 协作交接 · 2026-09-19
 
-用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01（研究修订历史）实现已完成并提交在分支 `codex/task-01-history`，报告见 [T01-implementation](handoff/reports/T01-implementation.md)，独立审计结论为 `changes_requested`，见 [T01-review](handoff/reports/T01-review.md)。78 项测试及前端构建通过，但保存期间继续输入会丢失草稿、历史 API 时间缺少 UTC 标记，需修复后复审。T02（PostgreSQL/Compose/恢复）等待 T01 审计通过并整合。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
+用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01（研究修订历史）实现已完成并提交在分支 `codex/task-01-history`，报告见 [T01-implementation](handoff/reports/T01-implementation.md)，独立审计结论为 `changes_requested`，见 [T01-review](handoff/reports/T01-review.md)。第二轮复审见 [T01-review-round2](handoff/reports/T01-review-round2.md)，被审计 HEAD 为 `a9e6d12`。79 项测试及前端构建通过；UTC 和保存期间继续输入已修复，但成功保存后项目缓存刷新滞后时，仍能把旧内容用新版本号写回，剩余 1 项 P1 阻断问题。T02（PostgreSQL/Compose/恢复）等待 T01 审计通过并整合。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
 
 交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。
