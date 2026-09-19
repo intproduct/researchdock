@@ -1,4 +1,4 @@
-"""CLI parsing and compose isolation checks (no Docker daemon needed).
+"""CLI parsing and compose isolation checks.
 
 R2: a generated env file, used exactly as documented, must be the env_file the
     backend and migrate services actually load -- never the project's .env.
@@ -8,10 +8,13 @@ R5: the CLI regression must assert the parsed values directly and must not
     dispatch to Docker. Parsing is exercised in-process via parse_args, so a
     Docker call can never be mistaken for a successful parse, and a negative
     control proves the check rejects the pre-fix parser's failure mode.
+R6: the compose config check must not swallow a non-zero exit: a config error
+    is a failure, and only a missing docker CLI is an explicit skip.
 """
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -51,19 +54,25 @@ def _resolve_env_file(path: Path) -> str:
 # --------------------------------------------------------------------------- R2
 
 
-def test_generated_env_is_self_contained_and_compose_loads_it(tmp_path):
+def test_generated_env_is_self_contained(tmp_path):
+    """R2 (generator half): the file pins ENV_FILE to itself.
+
+    Pure script behaviour; no compose or Docker involved. The compose-side
+    check is separate below so a missing compose CLI cannot mask it.
+    """
     env_file = tmp_path / "isolated.env"
     result = _run(str(SCRIPTS / "compose_env.py"), str(env_file))
     assert result.returncode == 0, result.stderr
     text = env_file.read_text(encoding="utf-8")
     assert "ENV_FILE=" in text, "generated env must pin ENV_FILE (R2)"
     assert "POSTGRES_PASSWORD=" in text and "SECRET_KEY=" in text
+    assert _resolve_env_file(env_file) == env_file.as_posix(), (
+        "ENV_FILE must point at the output file"
+    )
 
-    target = _resolve_env_file(env_file)
-    assert target == env_file.as_posix(), "ENV_FILE must point at the output file"
 
-    # Daemon-free: --no-env-resolution reports paths without printing secrets.
-    config = subprocess.run(
+def _compose_config(env_file: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
         [
             "docker", "compose",
             "--env-file", str(env_file),
@@ -72,17 +81,70 @@ def test_generated_env_is_self_contained_and_compose_loads_it(tmp_path):
         ],
         cwd=ROOT, capture_output=True, text=True,
     )
-    if config.returncode != 0:
-        # Docker unavailable: the assertion above still covers the R2 defect.
-        return
-    rendered = json.loads(config.stdout)
+
+
+def verify_compose_config(config: subprocess.CompletedProcess, env_file: Path) -> None:
+    """Assert compose rendered OK and both services load the generated env.
+
+    Kept a plain function so a non-zero exit / bad JSON can be injected and
+    asserted directly (R6): a compose error is a failure, never a silent pass.
+    """
+    assert config.returncode == 0, (
+        "compose config failed; this is a config error, not a skip: "
+        f"{config.stderr.strip()[:200]}"
+    )
+    try:
+        rendered = json.loads(config.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"compose config produced unreadable output: {config.stdout[:200]!r}"
+        ) from exc
+    services = rendered.get("services") or {}
     for service in ("backend", "migrate"):
-        entries = rendered["services"][service].get("env_file") or []
+        assert service in services, f"compose config is missing service {service}"
+        entries = services[service].get("env_file") or []
         assert entries, f"{service} has no env_file"
         loaded = entries[0]["path"] if isinstance(entries[0], dict) else entries[0]
         assert Path(loaded).name == env_file.name, (
             f"{service} would load {loaded}, not the generated env"
         )
+
+
+def test_compose_config_loads_generated_env(tmp_path):
+    """R2 (compose half): services must load the generated file.
+
+    `docker compose config --no-env-resolution` needs no daemon. Only a missing
+    docker CLI is an explicit skip; any other non-zero exit fails the test.
+    """
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI not installed; compose config cannot run")
+    env_file = tmp_path / "isolated.env"
+    assert _run(str(SCRIPTS / "compose_env.py"), str(env_file)).returncode == 0
+    verify_compose_config(_compose_config(env_file), env_file)
+
+
+def test_compose_config_error_fails_the_check(tmp_path):
+    """R6 fault injection: a non-zero compose exit must fail, not pass.
+
+    The audit replaced the config command with an exit-1 error and the old
+    test still reported success. verify_compose_config must raise instead.
+    """
+    env_file = tmp_path / "isolated.env"
+    assert _run(str(SCRIPTS / "compose_env.py"), str(env_file)).returncode == 0
+
+    failed = subprocess.CompletedProcess(
+        ["docker", "compose", "config"], 1, "",
+        "invalid compose project: required variable missing",
+    )
+    with pytest.raises(AssertionError, match="compose config failed"):
+        verify_compose_config(failed, env_file)
+
+    # A exit-0 run with an unexpected shape (missing service) also fails.
+    missing_service = subprocess.CompletedProcess(
+        ["docker", "compose", "config"], 0, json.dumps({"services": {}}), ""
+    )
+    with pytest.raises(AssertionError):
+        verify_compose_config(missing_service, env_file)
 
 
 # --------------------------------------------------------------------------- R4
