@@ -40,3 +40,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 ## T02 第二轮审计 · 2026-09-20
 
 交付 HEAD `8a80429` 已复审，结论 `changes_requested`。原 R1/R2/R3 具体缺陷已关闭；剩余两项 P2 为生成器仓库外路径报错（影响默认 CI）和 CLI 回归误放行原错误且调用真实 Docker。独立检查 84 passed、1 deselected（以四组无 Docker 派发探针补验）；前端构建通过。远端只完成基础环境准备，完整容器/PG/重启/恢复验收仍待完成。详见 [第二轮报告](handoff/reports/T02-review-round2.md)。main 保持 T01 accepted 基线；不开始 T03。
+
+## T02 第三轮审计 · 2026-09-20
+
+交付 HEAD `f9aa2c6` 已复审，结论 `changes_requested`。R4/R5 已关闭；新增一项 P2：Compose 配置检查将非零退出直接作为测试通过（R6）。独立完整回归 91 passed、2 条既有弃用警告；前端构建和增量 Ruff 检查通过；真实配置路径 2/2 与模拟 CLI 派发 4/4 通过。配置故障注入证实误放行，需修复回归门槛。远端运行证据仍未补齐，不整合 main、不开始 T03。详见 [第三轮报告](handoff/reports/T02-review-round3.md)。
