@@ -1,4 +1,4 @@
-# 开发状态 · 2026-09-19
+# 开发状态 · 2026-09-20
 
 ## 当前交付
 
@@ -21,7 +21,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 未验收与下一步
 
-1. Docker 已启动，已确认 Linux 引擎及 Compose 可用；真实 PostgreSQL、应用容器启动、HTTPS、云端部署及备份恢复仍待验收。不得宣称已经部署到云端。T01 的 PostgreSQL 迁移验证交由 T02。
+1. 本机 Docker 不再用于验收；按用户决定改用远端 2 核 2GB 服务器。用户已验证远端引擎、Compose 及四个基础镜像拉取；应用栈尚未完成验收。当前版本真实 PostgreSQL、容器启动与备份恢复仍待独立验证；HTTPS/正式上线留待 T14。不得宣称已经部署到云端。T01 的 PostgreSQL 迁移验证交由 T02。
 2. 历史只保存“项目状态快照”，不是完整研究日志：无撤销/恢复版本、diff 算法、全文搜索、单条详情 API，也不承诺数据库管理员无法篡改。
 3. GitHub App/OAuth、远端刷新、跨设备祖先关系比较尚未实现。当前关系仅相对于本机缓存的 upstream，不是不同机器的直接对比。
 4. 没有自动同步、合并或上传代码。下一阶段先做同步计划与人工可审查的差异，再考虑受控写入。
@@ -36,3 +36,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01 已通过第三轮审计（`accepted`），被审计交付 HEAD 为 `757dee0`，报告见 [T01-review-round3](handoff/reports/T01-review-round3.md)。79 项测试、前端构建及 6 项独立源码状态探针通过，旧版本对照有 3 项失败。UTC、保存期间新增草稿和慢刷新旧内容回写问题已关闭。浏览器工具本轮启动失败，未独立重跑端到端 UI，具体覆盖边界见报告。按协议本地整合 main 并保留全部历史；T02 已交付并完成首轮审计，结论 `changes_requested`：测试连接与 Compose 环境隔离有 2 项 P1，备份命令有 1 项 P2；Docker 重试仍返回 500，容器/恢复未独立验收。详见 [T02-review](handoff/reports/T02-review.md) 和 [手动验证步骤](handoff/T02-manual-test.zh-CN.md)。T02 未整合 main，不开始 T03。后续任务仍按 [路线图](handoff/ROADMAP.zh-CN.md) 规划。
 
 交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。
+
+## T02 第二轮审计 · 2026-09-20
+
+交付 HEAD `8a80429` 已复审，结论 `changes_requested`。原 R1/R2/R3 具体缺陷已关闭；剩余两项 P2 为生成器仓库外路径报错（影响默认 CI）和 CLI 回归误放行原错误且调用真实 Docker。独立检查 84 passed、1 deselected（以四组无 Docker 派发探针补验）；前端构建通过。远端只完成基础环境准备，完整容器/PG/重启/恢复验收仍待完成。详见 [第二轮报告](handoff/reports/T02-review-round2.md)。main 保持 T01 accepted 基线；不开始 T03。
