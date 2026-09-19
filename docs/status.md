@@ -33,6 +33,6 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 协作交接 · 2026-09-19
 
-用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01 已通过第三轮审计（`accepted`），被审计交付 HEAD 为 `757dee0`，报告见 [T01-review-round3](handoff/reports/T01-review-round3.md)。79 项测试、前端构建及 6 项独立源码状态探针通过，旧版本对照有 3 项失败。UTC、保存期间新增草稿和慢刷新旧内容回写问题已关闭。浏览器工具本轮启动失败，未独立重跑端到端 UI，具体覆盖边界见报告。按协议本地整合 main 并保留全部历史；T02 可从整合后的 main 接续，尚未实施。后续任务仍按 [路线图](handoff/ROADMAP.zh-CN.md) 规划。
+用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01 已通过第三轮审计（`accepted`），被审计交付 HEAD 为 `757dee0`，报告见 [T01-review-round3](handoff/reports/T01-review-round3.md)。79 项测试、前端构建及 6 项独立源码状态探针通过，旧版本对照有 3 项失败。UTC、保存期间新增草稿和慢刷新旧内容回写问题已关闭。浏览器工具本轮启动失败，未独立重跑端到端 UI，具体覆盖边界见报告。按协议本地整合 main 并保留全部历史；T02 已交付并完成首轮审计，结论 `changes_requested`：测试连接与 Compose 环境隔离有 2 项 P1，备份命令有 1 项 P2；Docker 重试仍返回 500，容器/恢复未独立验收。详见 [T02-review](handoff/reports/T02-review.md) 和 [手动验证步骤](handoff/T02-manual-test.zh-CN.md)。T02 未整合 main，不开始 T03。后续任务仍按 [路线图](handoff/ROADMAP.zh-CN.md) 规划。
 
 交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。
