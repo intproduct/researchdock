@@ -1,11 +1,12 @@
 # T02 实现报告
 
-- 状态：blocked_environment（审计 R1/R2/R3 已修复；容器栈、同源前端与恢复端到端仍待 Docker/远端环境）
+- 状态：blocked_environment（审计 R1/R2/R3、R4/R5 已修复；容器栈、同源前端与恢复端到端仍待 Docker/远端环境）
 - 任务卡：docs/handoff/TASK-02-postgres-compose.zh-CN.md
 - 分支：codex/task-02-postgres-compose
 - 实际 base SHA：9feceacc19cccb062dda61bd7aa8ea09079763e7（T01 accepted 后的整合 main）
 - 首轮被审计交付 HEAD：62063291d46d1e0279dd791c7c9e56e2051eb149（对应审计 T02-review.md）
-- 最后代码提交 SHA（此报告提交之前）：16509e62c34dac88756296105e57c26d7bea65eb
+- 第二轮被审计交付 HEAD：8a8042998ca6a8188f6aad2a4d574a4cb1f281d9（对应审计 T02-review-round2.md）
+- 最后代码提交 SHA（此报告提交之前）：f118154b70cb0f44bc54f87853f74dc3a58f9a56
 - 执行平台/解释器/Node/数据库版本：Windows 11 / Python 3.14.6 / Node 26.5 / PostgreSQL 17.11（容器，x86_64-pc-linux-musl）/ SQLite；Docker Desktop 29.3.1、Compose v5.1.1
 - 实际模型与服务来源（不知道写 unknown）：Kimi 后端（用户配置的 Claude Code 会话），其余 unknown
 
@@ -31,7 +32,9 @@
 | scripts/compose_env.py | 生成隔离 compose env（随机密钥，git 忽略） |
 | scripts/postgres_backup.py | compose 内 pg_dump/pg_restore；目标必须是明显测试库；非空目标默认拒绝覆盖；接受两种参数顺序 |
 | backend/tests/test_default_isolation.py | 新增 R1 回归：默认路径不动普通 DATABASE_URL、显式 TEST_DATABASE_URL 被使用、PG 不可用即失败 |
-| backend/tests/test_compose_backup_cli.py | 新增 R2/R3 回归：生成 env 自包含且服务实际加载它；备份 CLI 两种参数顺序可解析 |
+| backend/tests/test_compose_backup_cli.py | R2/R4/R5 回归：生成 env 自包含且服务实际加载它；仓库外输出可用且不覆盖；CLI 进程内解析覆盖四组文档顺序与负向对照 |
+| scripts/compose_env.py（R4） | 仓库外输出路径时成功提示回退为绝对路径，不再因 relative_to 抛错退出 1 |
+| scripts/postgres_backup.py（R5） | 抽出 build_parser/normalize_argv/parse_args，解析可单独调用而不派发 Docker |
 | docs/deployment-verification.md | 可重复的隔离验证步骤与清理方式；补 daemon-free 隔离核对命令 |
 
 ## 首轮审计问题逐项回应
@@ -67,6 +70,38 @@
 - 生成器现在自包含 `ENV_FILE`，因此 docs/handoff/T02-remote-server.zh-CN.md 第 6 节即使显式传 `ENV_FILE` 也与生成值一致，两种做法都指向同一隔离文件。
 - 该远端说明中的备份命令用“全局参数在子命令前”的顺序，正是 R3 修复后可用的形式；手动步骤未再改动。
 
+## 第二轮审计问题逐项回应
+
+第二轮审计报告：docs/handoff/reports/T02-review-round2.md（结论 changes_requested：R4、R5 均为 P2；并确认 R1/R2/R3 具体缺陷关闭）。修复提交：f118154（追加，未 squash）。
+
+### R4 · P2：仓库外输出路径导致生成器报错，默认 CI 会触发 —— 已修复
+
+原因：`compose_env.py` 成功提示执行 `target.relative_to(ROOT)`；输出在仓库外（如 CI 的 `/tmp`）时文件已写入，却抛 ValueError、退出码 1。
+
+修复（scripts/compose_env.py）：提示改为 `relative_to` 失败时回退显示绝对路径（`except ValueError`），仓库内仍显示相对路径。
+
+回归（backend/tests/test_compose_backup_cli.py）：
+
+1. `test_generator_accepts_output_outside_the_repository`：输出到**系统临时目录**（不是 pytest 的 `tmp_path`——在自定义 basetemp 下它可能落在仓库内，会让该用例失去意义），断言退出码 0、文件存在、`ENV_FILE` 精确指向该路径。
+2. `test_generator_refuses_to_overwrite`：重复生成仍拒绝覆盖（退出非 0）。
+3. 仓库内路径的既有 R2 用例继续断言退出码 0。
+
+按要求**没有**用“把 CI 临时目录移进仓库”来掩盖；修的是脚本本身。
+
+### R5 · P2：CLI 回归会误放行原错误，并调用真实 Docker —— 已修复
+
+原因：断言只排除 `"unrecognized arguments"` 一种文案，而原解析器对文档顺序报的是“缺少必需参数”，因而仍被判为通过；且测试经子进程跑真实入口，可能把 Docker 调用/任意异常当作解析成功。
+
+修复（scripts/postgres_backup.py）：抽出 `build_parser()`、`normalize_argv()`、`parse_args(argv)`，`main(argv=None)` 复用它们，使解析可被单独调用而不派发。
+
+回归重写为**进程内解析**（无 Docker、无派发）：
+
+- 四组文档顺序（backup/restore × 子命令在前/在后）逐一断言 `cmd`、`project`、`compose_env`，restore 另断言 `file`、`target_db`、`force_empty=False`。
+- 缺共享参数必须 `SystemExit(2)`。
+- 负向对照：`backup --project rm-x`（缺 `--compose-env`）必须退出 2，同时文档顺序必须解析成功——避免“为错误原因通过”。
+- 判别性核验：直接加载被审计提交 `6206329` 的原脚本，对文档顺序实得退出码 2 与“缺少必需参数”（即原缺陷），而新解析器通过；证明该回归现能捕获原错误。
+- 该测试内唯一的 `docker` 调用是 daemon-free 的 `compose config --no-env-resolution`（另一 R2 用例），不派发 backup/restore。
+
 ## 契约核对
 
 | 任务卡要求 | 结果 | 证据 |
@@ -81,20 +116,20 @@
 | 重启保留数据、不重置已有密码 | 未执行 | 需容器栈运行；initial_data 幂等逻辑已在 PG 单测中覆盖 |
 | 备份恢复：pg_dump 恢复到第二个空库并逐项核对 | 未执行 | 脚本已实现但需运行中的 compose db；Docker 故障 |
 | 权限恢复：恢复后已撤销设备仍拒绝 | 未执行 | 依赖上一条 |
-| 默认开发：SQLite 测试与本机启动仍可用，前端 build 通过 | 通过 | SQLite 全套 79 passed；npm run build 成功 |
+| 默认开发：SQLite 测试与本机启动仍可用，前端 build 通过 | 通过 | SQLite 全套 91 passed（首轮 66 + T01/T02 新增）；npm run build 成功 |
 | 测试库防误删限制 | 通过（代码+守门） | conftest 对非测试库名抛错；无 SQLite 回退；restore 脚本拒绝非测试库名 |
 
 ## 执行记录
 
 | 命令（去秘密） | 环境/数据库 | 退出码与数量 | 结果 |
 | --- | --- | --- | --- |
-| `pytest backend/tests agent/tests -q` | Windows/Python 3.14/临时 SQLite | 0，**85 passed** | 默认路径未回归（含首轮 79 + 本轮 6 项新回归） |
+| `pytest backend/tests agent/tests -q` | Windows/Python 3.14/临时 SQLite | 0，**91 passed** | 默认路径未回归（首轮 66 + T01/T02 新增；第二轮审计后 net +6） |
 | `pytest backend/tests/test_default_isolation.py -q`（R1） | 每例独立子进程 + 一次性 Sentinel SQLite | 0，3 passed | 普通 DATABASE_URL 不被采用且哨兵表保留；显式 TEST_DATABASE_URL 被使用；PG 不可用即失败。判别性对照：换回被审计 conftest `6206329` 则首项失败 |
-| `pytest backend/tests/test_compose_backup_cli.py -q`（R2/R3） | 无 daemon（`compose config --no-env-resolution`） | 0，3 passed | backend/migrate 的 env_file 指向生成文件；backup/restore 两种参数顺序均可解析；缺共享参数仍退出 2 |
+| `pytest backend/tests/test_compose_backup_cli.py -q`（R2/R4/R5） | 进程内解析；仅 R2 用 daemon-free `compose config --no-env-resolution` | 0，9 passed | env_file 指向生成文件；仓库外输出退出 0 且 ENV_FILE 指向实际路径；重复生成拒绝覆盖；四组文档顺序解析正确（含 cmd/project/compose-env/file/target-db）；缺共享参数退 2。判别性对照：`6206329` 原解析器对文档顺序退 2 |
 | `TEST_DATABASE_URL=postgresql+psycopg://…@127.0.0.1:55432/research_test TEST_SCHEMA_FROM_MIGRATIONS=1 pytest backend/tests -q` | 真实 PostgreSQL 17.11 容器（Alpine） | 0，73 passed（首轮） | PG + Alembic 建模式全绿；本轮修复后未重跑（Docker 不可用），待环境恢复复核 |
 | `python runtime/tmp/pg_upgrade_check.py`（首轮） | 第二个 PG 库 research_upgrade_test | 0 | 旧数据保留 + 单条基线回填，UPGRADE PATH OK |
 | `npm run build`（frontend） | Node 26.5 / Vite 8 | 0 | 生产构建成功 |
-| `ruff check backend/tests/conftest.py backend/tests/test_default_isolation.py backend/tests/test_compose_backup_cli.py scripts/` | Python 3.14 | 0 | 本轮新增/修改文件全部通过 |
+| `ruff check scripts/ backend/tests/`（本轮改动文件） | Python 3.14 | 0 | 全部通过 |
 | `ruff check backend/app` | Python 3.14 | 非 0，1 条 | 仅剩 `backend/app/api/deps.py` 的 I001 导入排序；该文件本包未改动，且在被审计的 T01 accepted 提交 `9feceac` 上已同样报错（预先存在，未顺手改，避免扩大范围） |
 | `docker compose --env-file runtime/env/t02.env -p rm-t02 config` | Compose v5.1.1 | 0 | 隔离配置解析通过（首轮）；本轮 R2 回归以 `--no-env-resolution` 复验 env_file 指向 |
 | `docker compose -p rm-t02 up -d --build` | Docker Desktop 29.3.1 | — | **未完成**：镜像层下载停滞，随后 daemon 对全部 API 返回 500 |
@@ -132,12 +167,12 @@ UI 操作步骤：**未执行**。容器栈未起来，无法在 Nginx 同源环
 | 输出 | unknown | tokens |
 | 推理 | unknown | tokens；与输出是否重叠需说明：unknown |
 | 实际费用或套餐用量 | unknown | 原币种/额度、计费来源、日期 |
-| 修复轮数 | 1 | 轮；首轮审计 changes_requested（R1/R2 两项 P1、R3 一项 P2）→ 修复提交 16509e6 |
-| 人类介入 | 3 | 次；确认镜像加速器来源、决定 Docker 故障时“先交付代码标阻塞”、转交 T02 审计报告 |
+| 修复轮数 | 2 | 轮；首轮 changes_requested（R1/R2 两项 P1、R3 一项 P2）→ 16509e6；第二轮 changes_requested（R4/R5 两项 P2）→ f118154 |
+| 人类介入 | 4 | 次；确认镜像加速器来源、决定 Docker 故障时“先交付代码标阻塞”、两次转交 T02 审计报告 |
 
 ## 交接
 
-- 状态 blocked_environment：审计 R1/R2/R3 已修复并有针对性回归（85 passed，含 6 项新回归）；真实 PG 数据库层证据已在首轮取得；容器栈、同源前端、重启与备份恢复端到端仍待环境恢复。
+- 状态 blocked_environment：审计 R1/R2/R3、R4/R5 已全部修复并有针对性回归（91 passed；R4/R5 回归均为进程内判别性检查，R5 不再经 Docker）；真实 PG 数据库层证据在首轮取得，本轮修复后未重跑；容器栈、同源前端、重启与备份恢复端到端仍待环境恢复。
 - 环境恢复后待办（按序，参考 docs/handoff/T02-manual-test.zh-CN.md 与 docs/handoff/T02-remote-server.zh-CN.md）：重启 Docker Desktop 或在远端 2C2G 服务器安装 Docker → 补齐镜像 → 起隔离栈（ENV_FILE 已自包含）→ 验证 Nginx 同源与 SPA 路由 → 重启持久化 → 备份恢复到第二空库逐项核对 → CI 远端执行。
 - 最终回复中提供包含本报告的 HEAD SHA。
 - 不自行写 accepted，不整合 main，不进入 T03。
