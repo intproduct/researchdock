@@ -10,7 +10,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 验证记录
 
-- Windows / Python 3.14：后端及 Agent 共 78 项测试通过（原 66 项回归 + T01 新增 12 项）。真实临时 Git 仓库覆盖领先、落后、分叉、未提交工作、浅克隆、游离 HEAD；API 覆盖账户隔离、设备撤销、重复及倒序上报、修订冲突。
+- Windows / Python 3.14：后端及 Agent 共 79 项测试通过（原 66 项回归 + T01 新增 13 项）。真实临时 Git 仓库覆盖领先、落后、分叉、未提交工作、浅克隆、游离 HEAD；API 覆盖账户隔离、设备撤销、重复及倒序上报、修订冲突。
 - T01 新增覆盖：创建即为单条 created 快照、更新到 2/3 后降序且内容正确、重复旧请求 409 且不新增历史、同内容 PUT 仍加版本、并发相同基线仅一个成功、历史写入失败回滚项目更新与 revision、新建失败不留孤立项目、外账户/匿名/设备凭据隔离、伪造 actor/origin/recorded_at 不生效、非法分页参数 422、分页无重复遗漏且翻页期间新增 revision 不破坏向旧版本翻页。
 - 迁移：临时 SQLite 上 upgrade 基线回填单条 `migrated_baseline`（actor_id 为 null，保留真实内容与 project_updated_at）、二次 upgrade 不重复插入、downgrade 删除历史表后再次 upgrade 恢复、空库 upgrade 得空历史、迁移后表结构与模型元数据一致。另对开发库副本做 upgrade 验证：已有 revision=2 的项目仅补一条基线，不伪造缺失的 1…N-1。
 - 浏览器完成登录、创建示例项目、保存研究进展，修订从 1 更新为 2；T01 后在隔离端口（8011/5183）与隔离库上实测：历史面板降序展示、展开快照、基线标签、加载更早的修订（10→12 条）、两个会话冲突时 409 保留草稿、采用最新内容后重新保存成功，无页面报错。
@@ -33,6 +33,6 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 
 ## 协作交接 · 2026-09-19
 
-用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01（研究修订历史）实现已完成并提交在分支 `codex/task-01-history`，报告见 [T01-implementation](handoff/reports/T01-implementation.md)，独立审计结论为 `changes_requested`，见 [T01-review](handoff/reports/T01-review.md)。第二轮复审见 [T01-review-round2](handoff/reports/T01-review-round2.md)，被审计 HEAD 为 `a9e6d12`。79 项测试及前端构建通过；UTC 和保存期间继续输入已修复，但成功保存后项目缓存刷新滞后时，仍能把旧内容用新版本号写回，剩余 1 项 P1 阻断问题。T02（PostgreSQL/Compose/恢复）等待 T01 审计通过并整合。后续任务只在 [路线图](handoff/ROADMAP.zh-CN.md) 中规划。
+用户已选择 Claude Code / Kimi 实现、Codex 设计与独立审计。T01 已通过第三轮审计（`accepted`），被审计交付 HEAD 为 `757dee0`，报告见 [T01-review-round3](handoff/reports/T01-review-round3.md)。79 项测试、前端构建及 6 项独立源码状态探针通过，旧版本对照有 3 项失败。UTC、保存期间新增草稿和慢刷新旧内容回写问题已关闭。浏览器工具本轮启动失败，未独立重跑端到端 UI，具体覆盖边界见报告。按协议本地整合 main 并保留全部历史；T02 可从整合后的 main 接续，尚未实施。后续任务仍按 [路线图](handoff/ROADMAP.zh-CN.md) 规划。
 
 交接文档已落盘；没有启动 Claude Code、自动通知或后台协调服务。实现方按任务卡创建本地提交和报告，再由用户转交审计请求；无需远端仓库。

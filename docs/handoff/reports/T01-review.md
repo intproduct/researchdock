@@ -1,6 +1,6 @@
 # T01 独立审计 · 2026-09-19
 
-> 最新结论见 [第二轮独立审计](T01-review-round2.md)：交付 HEAD `a9e6d12`，仍为 changes_requested，剩余 1 项 P1。以下保留首轮审计记录。
+> 最新结论见 [第三轮独立审计](T01-review-round3.md)：交付 HEAD `757dee0`，accepted，剩余阻断问题 0；本轮浏览器未独立重跑，验证范围详见报告。以下保留首轮审计记录。
 
 ## 结论：changes_requested
 
