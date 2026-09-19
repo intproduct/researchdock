@@ -140,7 +140,8 @@ def cmd_restore(compose: Compose, args: argparse.Namespace) -> None:
     print(f"Restored {backup.relative_to(ROOT)} into database {target}")
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI definition; separate so tests can parse without dispatching."""
     parser = argparse.ArgumentParser(
         description="PostgreSQL backup/restore via compose",
         epilog="Both argument orders are accepted: "
@@ -162,16 +163,32 @@ def main() -> None:
     restore.add_argument("--target-db", required=True, help="target test database name")
     restore.add_argument("--force-empty", action="store_true",
                          help="drop/recreate public schema in an existing target")
+    return parser
 
-    # Normalize: if the subcommand appears after the shared flags, move it to
-    # the front so the subparser sees it (argparse expects the subcommand first).
-    argv = sys.argv[1:]
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Accept the subcommand after the shared flags (R3).
+
+    argparse expects the subcommand first, so if the documented order puts
+    flags first, move the subcommand to the front.
+    """
     if argv and argv[0].startswith("-"):
         for index, token in enumerate(argv):
             if token in ("backup", "restore"):
-                argv = [token, *argv[:index], *argv[index + 1:]]
-                break
-    args = parser.parse_args(argv)
+                return [token, *argv[:index], *argv[index + 1:]]
+    return argv
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments; raises SystemExit(2) on a usage error."""
+    parser = build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+    return parser.parse_args(normalize_argv(list(argv)))
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
 
     compose_env = Path(args.compose_env)
     if not compose_env.is_absolute():

@@ -58,9 +58,13 @@ def main() -> None:
         target.chmod(0o600)
     except OSError:
         pass  # best effort on Windows
+    try:
+        shown = target.relative_to(ROOT)
+    except ValueError:
+        # Output outside the repo (e.g. a default CI temp dir) is valid.
+        shown = target
     print(
-        f"Wrote isolated compose env to {target.relative_to(ROOT)} "
-        f"({len(values)} keys, ENV_FILE pinned)"
+        f"Wrote isolated compose env to {shown} ({len(values)} keys, ENV_FILE pinned)"
     )
 
 
