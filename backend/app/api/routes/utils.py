@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic.networks import EmailStr
+from sqlalchemy import text
 
-from app.api.deps import get_current_active_superuser
+from app.api.deps import SessionDep, get_current_active_superuser
 from app.models import Message
 from app.utils import generate_test_email, send_email
 
@@ -29,3 +30,13 @@ def test_email(email_to: EmailStr) -> Message:
 @router.get("/health-check/")
 async def health_check() -> bool:
     return True
+
+
+@router.get("/readiness/")
+def readiness(session: SessionDep) -> dict[str, str]:
+    """Report real database connectivity, not just that the process started."""
+    try:
+        session.exec(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 -- surface any driver error as 503
+        raise HTTPException(503, "database unavailable") from exc
+    return {"database": "ok"}

@@ -32,7 +32,9 @@ target_metadata = SQLModel.metadata
 
 
 def get_url():
-    return str(settings.DATABASE_URL)
+    # An in-process override (tests/tools) wins over the env-file value, so a
+    # migration can target an explicit test database without touching .env.
+    return config.attributes.get("override_url") or str(settings.DATABASE_URL)
 
 
 def run_migrations_offline():

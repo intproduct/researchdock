@@ -1,7 +1,7 @@
 import warnings
-from typing import Literal, Self
 from pathlib import Path
-from sqlalchemy.engine import make_url
+from typing import Any, Literal, Self
+from urllib.parse import quote
 
 from pydantic import (
     EmailStr,
@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -30,8 +31,29 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None
-    DATABASE_URL: str
+    DATABASE_URL: str = ""
     ENABLE_SIGNUP: bool = False
+    # Compose/deploy convenience: when DATABASE_URL is not given but a Postgres
+    # password is, build the DSN from parts with a correctly percent-encoded
+    # password so reserved characters (e.g. @ or :) cannot mis-parse the host.
+    POSTGRES_PASSWORD: str | None = None
+    POSTGRES_USER: str = "research"
+    POSTGRES_DB: str = "research"
+    POSTGRES_HOST: str = "db"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compose_database_url(cls, data: Any) -> Any:
+        if isinstance(data, dict) and not data.get("DATABASE_URL"):
+            password = data.get("POSTGRES_PASSWORD")
+            if password:
+                encoded = quote(str(password), safe="")
+                user = data.get("POSTGRES_USER", "research")
+                host = data.get("POSTGRES_HOST", "db")
+                name = data.get("POSTGRES_DB", "research")
+                data = {**data, "DATABASE_URL":
+                        f"postgresql+psycopg://{user}:{encoded}@{host}:5432/{name}"}
+        return data
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

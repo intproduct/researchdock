@@ -1,18 +1,34 @@
+from sqlalchemy import event
 from sqlmodel import Session, create_engine, select
 
-from app import crud
+from app import (
+    crud,
+    research_models,  # noqa: F401 -- register research tables
+)
 from app.core.config import settings
 from app.models import User, UserCreate
 
-from sqlalchemy import event
-from app import research_models  # noqa: F401 -- register research tables
 
-engine = create_engine(str(settings.DATABASE_URL), pool_pre_ping=True,
-    connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {})
-if settings.DATABASE_URL.startswith("sqlite"):
-    @event.listens_for(engine, "connect")
-    def enable_sqlite_foreign_keys(connection, _):
-        connection.execute("PRAGMA foreign_keys=ON")
+def create_engine_for(database_url: str):
+    """Build an engine for a given URL; SQLite gets thread/foreign-key tweaks.
+
+    Keeping this a function lets tests and tools construct a PostgreSQL engine
+    explicitly (TEST_DATABASE_URL) instead of relying on the import-time engine.
+    """
+    is_sqlite = database_url.startswith("sqlite")
+    engine = create_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"check_same_thread": False} if is_sqlite else {},
+    )
+    if is_sqlite:
+        @event.listens_for(engine, "connect")
+        def enable_sqlite_foreign_keys(connection, _):
+            connection.execute("PRAGMA foreign_keys=ON")
+    return engine
+
+
+engine = create_engine_for(str(settings.DATABASE_URL))
 
 
 # make sure all SQLModel models are imported (app.models) before initializing DB
