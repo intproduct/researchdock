@@ -1,16 +1,21 @@
 """Generate an isolated compose env file for testing or local deployment.
 
-Why: compose.yaml reads ``.env`` by default, and ``docker compose --env-file``
-only changes interpolation, not the ``env_file:`` a service loads. This tool
-writes a dedicated env file (secrets included, git-ignored under runtime/) and
-compose.yaml takes it via ``ENV_FILE=<path>`` so a test stack never reads or
-overwrites the developer's everyday .env or database.
+Why: ``docker compose --env-file X`` only changes *interpolation*. The
+``env_file:`` a service loads is separate, so without setting ``ENV_FILE`` the
+backend/migrate containers would still read the developer's everyday ``.env``
+and mix in its SECRET_KEY, accounts and DATABASE_URL (R2).
 
-Usage:
+This tool therefore writes a dedicated env file (secrets included, git-ignored
+under runtime/) that also contains ``ENV_FILE=<its own absolute path>``, so the
+documented command alone gives a fully isolated stack:
+
   python scripts/compose_env.py runtime/env/t02.env
-
-Then run the stack isolated:
   docker compose --env-file runtime/env/t02.env -p rm-t02 up -d --build
+
+Verifying isolation without a daemon:
+  docker compose --env-file runtime/env/t02.env -p rm-t02 \
+      config --no-env-resolution --format json
+  # both backend and migrate env_file[0].path must equal the generated path
 """
 
 import secrets
@@ -30,6 +35,9 @@ def main() -> None:
         raise SystemExit(f"Refusing to overwrite existing env file: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     values = {
+        # Pin the service env_file to this very file so the stack cannot fall
+        # back to the project's .env (path is quoted: compose keeps it literal).
+        "ENV_FILE": f'"{target.as_posix()}"',
         "PROJECT_NAME": "Research Manager",
         "SECRET_KEY": secrets.token_urlsafe(48),
         # Compose builds the Postgres DSN from these; the password is
@@ -50,7 +58,10 @@ def main() -> None:
         target.chmod(0o600)
     except OSError:
         pass  # best effort on Windows
-    print(f"Wrote isolated compose env to {target.relative_to(ROOT)} ({len(values)} keys)")
+    print(
+        f"Wrote isolated compose env to {target.relative_to(ROOT)} "
+        f"({len(values)} keys, ENV_FILE pinned)"
+    )
 
 
 if __name__ == "__main__":

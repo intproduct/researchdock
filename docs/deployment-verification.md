@@ -14,7 +14,14 @@
 .\.venv\Scripts\python.exe scripts\compose_env.py runtime\env\t02.env
 ```
 
-生成带随机 `SECRET_KEY`、`POSTGRES_PASSWORD`、`FIRST_SUPERUSER_PASSWORD` 的 `runtime/env/t02.env`（已 git 忽略）。`compose.yaml` 用 `ENV_FILE` 指向它，故测试栈与开发库完全隔离。
+生成带随机 `SECRET_KEY`、`POSTGRES_PASSWORD`、`FIRST_SUPERUSER_PASSWORD` 的 `runtime/env/t02.env`（已 git 忽略）。文件内自带 `ENV_FILE=<自身绝对路径>`，使服务的 `env_file:` 指向它而不是项目根 `.env`；`--env-file` 只控制插值，无法替代这一点。
+
+可用以下命令在不起容器的情况下核对隔离是否生效（只看路径，不读秘密）：
+
+```powershell
+docker compose --env-file runtime\env\t02.env -p rm-t02 config --no-env-resolution --format json
+# 展开后检查：backend 与 migrate 的 env_file[0].path 都应是上面那个生成的 env 文件，不是 .env
+```
 
 ## 2. 构建并启动整套栈（迁移 + 初始化 + 后端 + 前端）
 

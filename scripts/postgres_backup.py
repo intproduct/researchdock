@@ -10,12 +10,12 @@ Safety:
 - No password is passed on the command line or printed; credentials are
   injected by compose into the container environment.
 
-Examples (note the isolated project name and env file):
-  python scripts/postgres_backup.py backup \\
-      --project rm-t02 --compose-env runtime/env/t02.env
-  python scripts/postgres_backup.py restore \\
-      --project rm-t02 --compose-env runtime/env/t02.env \\
-      --file runtime/backups/research-<stamp>.dump \\
+Examples (note the isolated project name and env file; both argument orders
+work -- shared flags may come before or after the subcommand):
+  python scripts/postgres_backup.py --project rm-t02 --compose-env runtime/env/t02.env backup
+  python scripts/postgres_backup.py backup --project rm-t02 --compose-env runtime/env/t02.env
+  python scripts/postgres_backup.py --project rm-t02 --compose-env runtime/env/t02.env restore \
+      --file runtime/backups/research-<stamp>.dump \
       --target-db research_restore_test
 """
 
@@ -23,6 +23,7 @@ import argparse
 import re
 import secrets
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -140,17 +141,37 @@ def cmd_restore(compose: Compose, args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PostgreSQL backup/restore via compose")
-    parser.add_argument("--compose-env", required=True, help="compose env file path")
-    parser.add_argument("--project", required=True, help="isolated compose project name")
+    parser = argparse.ArgumentParser(
+        description="PostgreSQL backup/restore via compose",
+        epilog="Both argument orders are accepted: "
+               "'backup --project P --compose-env E' and "
+               "'--project P --compose-env E backup'.",
+    )
+    # The shared flags are accepted either before or after the subcommand so
+    # the documented commands keep working verbatim (R3).
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--compose-env", required=True, help="compose env file path")
+    common.add_argument("--project", required=True, help="isolated compose project name")
+
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("backup", help="pg_dump the compose database")
-    restore = sub.add_parser("restore", help="restore a backup into a test database")
+    sub.add_parser("backup", parents=[common], help="pg_dump the compose database")
+    restore = sub.add_parser(
+        "restore", parents=[common], help="restore a backup into a test database"
+    )
     restore.add_argument("--file", required=True, help="backup file (under runtime/backups/)")
     restore.add_argument("--target-db", required=True, help="target test database name")
     restore.add_argument("--force-empty", action="store_true",
                          help="drop/recreate public schema in an existing target")
-    args = parser.parse_args()
+
+    # Normalize: if the subcommand appears after the shared flags, move it to
+    # the front so the subparser sees it (argparse expects the subcommand first).
+    argv = sys.argv[1:]
+    if argv and argv[0].startswith("-"):
+        for index, token in enumerate(argv):
+            if token in ("backup", "restore"):
+                argv = [token, *argv[:index], *argv[index + 1:]]
+                break
+    args = parser.parse_args(argv)
 
     compose_env = Path(args.compose_env)
     if not compose_env.is_absolute():

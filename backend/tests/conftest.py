@@ -2,7 +2,10 @@
 
 Two modes, selected by TEST_DATABASE_URL:
 
-- unset        -> SQLite in a temporary file (the default local/dev workflow).
+- unset        -> SQLite in a temp file this run owns (the default local/dev
+                  workflow). An ordinary DATABASE_URL in the caller's
+                  environment is deliberately NOT used: the suite drops and
+                  recreates the schema, so it must never touch a real database.
 - postgres URL -> that PostgreSQL database, schema built by Alembic migrations
                   when TEST_SCHEMA_FROM_MIGRATIONS=1, otherwise by create_all.
 
@@ -23,13 +26,14 @@ _SCHEMA_FROM_MIGRATIONS = os.environ.get("TEST_SCHEMA_FROM_MIGRATIONS") == "1"
 if _TEST_DB_URL:
     os.environ["DATABASE_URL"] = _TEST_DB_URL
 else:
-    # mkdtemp (not TemporaryDirectory) so cleanup cannot raise at interpreter
-    # shutdown on Windows while SQLite still holds the file handle.
+    # Force (not setdefault) a temp file owned by this run. A pre-existing
+    # DATABASE_URL in the environment must not leak in: the fixtures below
+    # drop and recreate the schema, which would destroy a real database (R1).
     _TEST_DIR = tempfile.mkdtemp(prefix="research-manager-test-")
     atexit.register(shutil.rmtree, _TEST_DIR, True)
-    os.environ.setdefault(
-        "DATABASE_URL", "sqlite:///" + (Path(_TEST_DIR) / "test.db").as_posix()
-    )
+    os.environ["DATABASE_URL"] = "sqlite:///" + (
+        Path(_TEST_DIR) / "test.db"
+    ).as_posix()
 
 os.environ.setdefault("SECRET_KEY", "test-only-secret-key-not-for-deployment-2026")
 os.environ.setdefault("PROJECT_NAME", "Research Manager Test")
@@ -39,18 +43,18 @@ os.environ.setdefault("ENABLE_SIGNUP", "true")
 os.environ.setdefault("EMAILS_FROM_EMAIL", "noreply@example.com")
 os.environ.setdefault("FASTAPI_ENV", "development")
 
-from collections.abc import Generator
+from collections.abc import Generator  # noqa: E402
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.engine import make_url
-from sqlmodel import Session, SQLModel
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+from sqlmodel import Session, SQLModel  # noqa: E402
 
-from app.core.config import settings
-from app.core.db import create_engine_for
-from app.main import app
-from tests.utils.user import authentication_token_from_email
-from tests.utils.utils import get_superuser_token_headers
+from app.core.config import settings  # noqa: E402
+from app.core.db import create_engine_for  # noqa: E402
+from app.main import app  # noqa: E402
+from tests.utils.user import authentication_token_from_email  # noqa: E402
+from tests.utils.utils import get_superuser_token_headers  # noqa: E402
 
 DATABASE_URL = str(settings.DATABASE_URL)
 
@@ -78,7 +82,7 @@ def _print_dialect_evidence() -> None:
     """Secret-free proof of which dialect/DB the suite actually used."""
     parsed = make_url(DATABASE_URL)
     detail = parsed.host or "local-file"
-    print(
+    print(  # noqa: T201 -- intentional, visible evidence for auditors
         f"\n[test-db] dialect={engine.dialect.name} driver={engine.dialect.driver} "
         f"database={parsed.database!r} host={detail!r} "
         f"schema_from_migrations={_SCHEMA_FROM_MIGRATIONS}"
