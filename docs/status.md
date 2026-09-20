@@ -44,3 +44,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 ## T02 第三轮审计 · 2026-09-20
 
 交付 HEAD `f9aa2c6` 已复审，结论 `changes_requested`。R4/R5 已关闭；新增一项 P2：Compose 配置检查将非零退出直接作为测试通过（R6）。独立完整回归 91 passed、2 条既有弃用警告；前端构建和增量 Ruff 检查通过；真实配置路径 2/2 与模拟 CLI 派发 4/4 通过。配置故障注入证实误放行，需修复回归门槛。远端运行证据仍未补齐，不整合 main、不开始 T03。详见 [第三轮报告](handoff/reports/T02-review-round3.md)。
+
+## T02 第四轮审计 · 2026-09-20
+
+交付 HEAD `1fade9c` 已复审，R1–R6 已知代码问题全部关闭，本轮未发现新的阻断代码缺陷。独立回归 93 passed、2 条既有弃用警告，无 skip/deselect；前端构建、增量 Ruff、真实 Compose 路径检查及新旧入口故障注入通过。整体状态为 `blocked_environment`：可以进入远端验收，但当前版本 PG/容器/重启/备份恢复证据仍未补齐，尚非 accepted；不整合 main，不开始 T03。详见 [第四轮报告](handoff/reports/T02-review-round4.md)。下一步从 [远端说明](handoff/T02-remote-server.zh-CN.md) 第 5 节上传确定版本，已有基础环境准备无需重做。
