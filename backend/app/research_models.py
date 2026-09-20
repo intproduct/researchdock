@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
-from sqlalchemy import JSON, DateTime, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKeyConstraint, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.models import get_datetime_utc
@@ -142,9 +142,91 @@ class DevicePublic(BaseModel):
     created_at: datetime
 
 
+class Repository(SQLModel, table=True):
+    """A logical repository identity within one project.
+
+    The UUID is the identity. The name is a display label only: duplicate names
+    within a project are allowed and never used to merge or deduplicate.
+    """
+
+    __table_args__ = (
+        # Enables the composite FK from WorkingCopy(repository_id, project_id),
+        # which guarantees a copy can only bind a repository of its own project.
+        UniqueConstraint("id", "project_id", name="uq_repository_id_project"),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", ondelete="CASCADE", index=True
+    )
+    name: str = Field(max_length=120)
+    revision: int = 1
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )
+
+
+class RepositoryCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("仓库名称不能为空")
+        return value.strip()
+
+
+class RepositoryUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+    revision: int = Field(ge=1)
+
+    @field_validator("name")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("仓库名称不能为空")
+        return value.strip()
+
+
+class RepositoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def _as_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
+class CopyRepositoryBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    repository_id: uuid.UUID | None = None
+    binding_revision: int = Field(ge=0)
+
+
 class WorkingCopy(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("device_id", "local_path", name="uq_device_path"),
+        # Composite FK forces the bound repository to belong to the same project
+        # as the copy; a bare repository_id FK would allow cross-project binds.
+        ForeignKeyConstraint(
+            ["repository_id", "project_id"],
+            ["repository.id", "repository.project_id"],
+            name="fk_copy_repository_project",
+            ondelete="SET NULL",
+        ),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     project_id: uuid.UUID = Field(
@@ -154,6 +236,12 @@ class WorkingCopy(SQLModel, table=True):
         foreign_key="device.id", ondelete="CASCADE", index=True
     )
     local_path: str = Field(max_length=2048)
+    # null means "uncategorized"; it is not a default/implicit repository.
+    repository_id: uuid.UUID | None = Field(default=None, index=True)
+    # Optimistic-concurrency counter for the binding only; 0 for legacy copies
+    # and for copies registered without a repository, 1 when bound at creation.
+    # server_default matches the migration so metadata and schema agree exactly.
+    binding_revision: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     sequence: int = 0
     branch: str | None = Field(default=None, max_length=512)
     head: str | None = Field(default=None, max_length=64)
@@ -171,8 +259,11 @@ class WorkingCopy(SQLModel, table=True):
 
 
 class CopyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     project_id: uuid.UUID
     local_path: str = Field(min_length=1, max_length=2048)
+    # Optional explicit repository binding; None (or omitted) means uncategorized.
+    repository_id: uuid.UUID | None = None
 
 
 class Observation(BaseModel):
