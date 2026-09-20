@@ -39,11 +39,14 @@ Linux/macOS 将上述解释器替换为 `.venv/bin/python`，npm 命令替换为
 python -m pip install ./agent
 python -m research_agent login --server https://YOUR_SERVER --email YOUR_EMAIL
 python -m research_agent projects
-python -m research_agent link --project PROJECT_ID --path "YOUR_REPOSITORY_PATH"
+python -m research_agent repositories --project PROJECT_ID
+python -m research_agent link --project PROJECT_ID --repository REPOSITORY_ID --path "YOUR_REPOSITORY_PATH"
 python -m research_agent scan --watch 30
 ```
 
 本机联调可使用 `--server http://localhost:5173`。密码交互输入；设备凭据保存在用户目录 `.research-manager/agent.db`。可用 `RESEARCH_AGENT_HOME` 指定独立配置目录。网页撤销设备后，其凭据立即失效。断网队列只保留每个副本的最新观察，不是历史日志或备份。
+
+仓库是项目内的逻辑身份（UUID），与 Git remote 地址无关；同名仓库不会自动合并。`link` 时 `--repository` 可选：指定则登记并绑定到该仓库；不指定则登记为“未归类”，可稍后在网页项目详情页关联/改绑/解绑。仓库身份以网页确认为准，客户端不会根据 remote 自动选择仓库。
 
 ## 云服务器部署准备
 

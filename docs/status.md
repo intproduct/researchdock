@@ -54,3 +54,9 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 按用户请求新增 [T03 完整任务卡](handoff/TASK-03-repository-identity.zh-CN.md)，明确 Repository UUID、同项目副本显式关联、并发版本、旧 Agent 兼容、迁移与 A01–A13 验收；更新 [后续路线图](handoff/ROADMAP.zh-CN.md)，区分多机器手动试用、GitHub 总览和个人日常使用，并拆分可提前执行的 T14a 云运行基础与 T14b 上线验收。
 
 本次只修改规划与交接文档，没有新增 Repository 模型/API 或开始 T03 编码。T03 状态 planned，实施等待 T02 accepted 并整合 main。T02 仍以第四轮报告为准，远端运行验收尚未完成。后续各包不因出现在路线图就自动获得实施授权。
+
+## T02 整合与 T03 交付 · 2026-09-21
+
+用户在本会话明确授权：豁免 T02 远端运行验收即推进，并在 T02 正式 accepted 前开始 T03 编码（偏离既定协议，T02 远端 PG/容器/重启/备份恢复证据仍缺失，不视为 accepted）。据此 T02 分支已快进整合入 main（无重写），T03 自实际 main（base `62cb7f1`）建 `codex/task-03-repository-identity`。
+
+T03 已交付实现：Repository 身份模型与同项目复合 FK、迁移 `c4d8e2f15a07`、仓库 CRUD 与副本绑定 API、Agent `repositories`/`link --repository`、前端仓库分组面板，及 A01–A13 测试（A05/A10 仅 SQLite 实测、A11 浏览器与 A13 Linux 未执行）。详见 [T03 实现报告](handoff/reports/T03-implementation.md)。状态 `ready_for_review`，等待 Codex 独立审计；未自标 accepted。

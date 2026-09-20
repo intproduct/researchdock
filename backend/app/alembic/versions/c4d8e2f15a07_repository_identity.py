@@ -24,7 +24,6 @@ import sqlalchemy as sa
 import sqlmodel.sql.sqltypes
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = 'c4d8e2f15a07'
 down_revision = 'b7f3a1c29e04'
