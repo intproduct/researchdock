@@ -38,11 +38,21 @@ export interface ProjectHistoryPage {
   items: ProjectRevision[]
   next_before_revision: number | null
 }
+export interface Repository {
+  id: string
+  project_id: string
+  name: string
+  revision: number
+  created_at: string
+  updated_at: string
+}
 export interface WorkingCopy {
   id: string
   project_id: string
   device_id: string
   local_path: string
+  repository_id: string | null
+  binding_revision: number
   branch: string | null
   head: string | null
   upstream: string | null
@@ -123,6 +133,10 @@ export const comparisons: Record<string, string> = {
   diverged: "历史分叉",
   unknown: "待确认",
   unrelated: "无共同历史",
+}
+/** Short, non-unique label to tell same-name repositories apart in the UI. */
+export function shortId(id: string) {
+  return id.slice(0, 8)
 }
 export function date(value: string | null) {
   if (!value) return "尚无记录"

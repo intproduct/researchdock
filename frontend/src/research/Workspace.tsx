@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { type FormEvent, type ReactNode, useId, useRef, useState } from "react"
 import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -35,6 +36,8 @@ import {
   isApiError,
   online,
   type Project,
+  type Repository,
+  shortId,
   stages,
   type WorkingCopy,
 } from "./api"
@@ -106,7 +109,8 @@ async function copyText(value: string) {
 }
 function ConnectionGuide({ projectId }: { projectId?: string }) {
   const server = import.meta.env.VITE_API_URL || window.location.origin
-  const command = `python -m research_agent login --server ${server} --email YOUR_EMAIL\npython -m research_agent projects\npython -m research_agent link --project ${projectId ?? "PROJECT_ID"} --path "YOUR_REPOSITORY_PATH"\npython -m research_agent scan --watch 30`
+  const project = projectId ?? "PROJECT_ID"
+  const command = `python -m research_agent login --server ${server} --email YOUR_EMAIL\npython -m research_agent projects\npython -m research_agent repositories --project ${project}\npython -m research_agent link --project ${project} --repository REPOSITORY_ID --path "YOUR_REPOSITORY_PATH"\npython -m research_agent scan --watch 30`
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -146,9 +150,10 @@ function ConnectionGuide({ projectId }: { projectId?: string }) {
             </Button>
           </li>
           <li className="text-muted-foreground">
-            替换 YOUR_EMAIL 和
-            YOUR_REPOSITORY_PATH。客户端不会上传文件正文，也不会执行 fetch、push
-            或覆盖本地文件。
+            替换 YOUR_EMAIL、REPOSITORY_ID 和 YOUR_REPOSITORY_PATH。先用
+            repositories 命令查看本项目的仓库 ID，link 时可选 --repository
+            绑定；不带则登记为未归类，可稍后在本页关联。
+            客户端不会上传文件正文，也不会执行 fetch、push 或覆盖本地文件。
           </li>
         </ol>
       </DialogContent>
@@ -443,6 +448,400 @@ export function Workspace({ listing = false }: { listing?: boolean }) {
         <ConnectionGuide />
       </aside>
     </div>
+  )
+}
+
+function CopyRow({
+  copy,
+  devices,
+}: {
+  copy: WorkingCopy
+  devices: Device[] | undefined
+}) {
+  const d = devices?.find((x) => x.id === copy.device_id)
+  return (
+    <li className="rounded-lg border bg-background px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium">
+          {d?.name ?? "设备"}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {d?.revoked
+              ? "已撤销"
+              : d && online(d)
+                ? "最近在线"
+                : "离线 / 未上报"}
+          </span>
+        </span>
+        <Pill warn={copy.comparison !== "synced"}>
+          {comparisons[copy.comparison] ?? copy.comparison}
+        </Pill>
+      </div>
+      <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+        {copy.local_path}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {copy.observed_at ? `观察于 ${date(copy.observed_at)}` : "尚未扫描"}
+      </p>
+    </li>
+  )
+}
+
+function RenameRepository({
+  repo,
+  onDone,
+}: {
+  repo: Repository
+  onDone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(repo.name)
+  // Pin the revision the dialog opened with; a 409 must show fresh data and
+  // never silently reuse a stale expectation.
+  const [base, setBase] = useState(repo.revision)
+  const [conflict, setConflict] = useState(false)
+  const mutation = useMutation({
+    mutationFn: () =>
+      api<Repository>(
+        `/repositories/${repo.id}`,
+        { name, revision: base },
+        "PUT",
+      ),
+    onSuccess: () => {
+      toast.success("仓库已改名")
+      setConflict(false)
+      setOpen(false)
+      onDone()
+    },
+    onError: (e: Error) => {
+      if (isApiError(e, 409)) {
+        // Keep the typed name; surface the conflict and let the user refresh.
+        setConflict(true)
+        onDone()
+      } else {
+        toast.error(e.message)
+      }
+    },
+  })
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v)
+        if (v) {
+          setName(repo.name)
+          setBase(repo.revision)
+          setConflict(false)
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" aria-label={`改名 ${repo.name}`}>
+          改名
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>重命名仓库</DialogTitle>
+          <DialogDescription>
+            只更改显示名称，仓库 UUID 与副本关联保持不变，也不影响项目修订历史。
+          </DialogDescription>
+        </DialogHeader>
+        {conflict && (
+          <p
+            role="alert"
+            className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40"
+          >
+            该仓库已被更新到修订 {repo.revision}。你的输入已保留；最新名称是 “
+            {repo.name}”。确认后请重新提交。
+          </p>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            mutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <Input
+            aria-label="仓库名称"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={120}
+            required
+          />
+          <Button
+            type="submit"
+            disabled={mutation.isPending}
+            className="w-full"
+          >
+            {mutation.isPending ? "保存中…" : "保存名称"}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BindCopy({
+  copy,
+  repositories,
+  onDone,
+}: {
+  copy: WorkingCopy
+  repositories: Repository[]
+  onDone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [target, setTarget] = useState(copy.repository_id ?? "")
+  const [base, setBase] = useState(copy.binding_revision)
+  const [conflict, setConflict] = useState(false)
+  const mutation = useMutation({
+    mutationFn: () =>
+      api<WorkingCopy>(
+        `/copies/${copy.id}/repository`,
+        {
+          repository_id: target === "" ? null : target,
+          binding_revision: base,
+        },
+        "PUT",
+      ),
+    onSuccess: () => {
+      toast.success("关联已更新（仅更改管理关系，不搬动本地文件）")
+      setConflict(false)
+      setOpen(false)
+      onDone()
+    },
+    onError: (e: Error) => {
+      if (isApiError(e, 409)) {
+        setConflict(true)
+        onDone()
+      } else {
+        toast.error(e.message)
+      }
+    },
+  })
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v)
+        if (v) {
+          setTarget(copy.repository_id ?? "")
+          setBase(copy.binding_revision)
+          setConflict(false)
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" aria-label="更改关联">
+          更改关联
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>更改副本的仓库关联</DialogTitle>
+          <DialogDescription>
+            只更改管理关系，不搬动本地文件，也不改变观察历史。
+          </DialogDescription>
+        </DialogHeader>
+        {conflict && (
+          <p
+            role="alert"
+            className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40"
+          >
+            该副本的关联已被更新。你的选择已保留；请刷新查看最新关联后重新提交。
+          </p>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            mutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <select
+            aria-label="选择仓库"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            className={`${inputStyle} bg-card`}
+          >
+            <option value="">未归类</option>
+            {repositories.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}（{shortId(r.id)}）
+              </option>
+            ))}
+          </select>
+          <Button
+            type="submit"
+            disabled={mutation.isPending}
+            className="w-full"
+          >
+            {mutation.isPending ? "提交中…" : "确认关联"}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RepositoriesPanel({
+  projectId,
+  copies,
+  devices,
+}: {
+  projectId: string
+  copies: WorkingCopy[] | undefined
+  devices: Device[] | undefined
+}) {
+  const cache = useQueryClient()
+  const repositories = useQuery({
+    queryKey: ["repositories", projectId],
+    queryFn: () => api<Repository[]>(`/projects/${projectId}/repositories`),
+  })
+  const [newName, setNewName] = useState("")
+  const create = useMutation({
+    mutationFn: () =>
+      api<Repository>(`/projects/${projectId}/repositories`, { name: newName }),
+    onSuccess: () => {
+      setNewName("")
+      toast.success("仓库已创建")
+      cache.invalidateQueries({ queryKey: ["repositories", projectId] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const refreshAll = () => {
+    cache.invalidateQueries({ queryKey: ["repositories", projectId] })
+    cache.invalidateQueries({ queryKey: ["copies", projectId] })
+  }
+  const list = repositories.data ?? []
+  const byRepo = new Map<string, WorkingCopy[]>()
+  const ungrouped: WorkingCopy[] = []
+  for (const c of copies ?? []) {
+    if (c.repository_id) {
+      byRepo.set(c.repository_id, [...(byRepo.get(c.repository_id) ?? []), c])
+    } else {
+      ungrouped.push(c)
+    }
+  }
+  return (
+    <section className="rounded-2xl border bg-card p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">仓库</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            仓库是项目内的逻辑身份（UUID），与 remote
+            地址无关；同名不会自动合并。
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="刷新仓库"
+          onClick={refreshAll}
+        >
+          <RefreshCw size={16} />
+        </Button>
+      </div>
+      <form
+        className="mt-4 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (newName.trim()) create.mutate()
+        }}
+      >
+        <Input
+          aria-label="新仓库名称"
+          placeholder="新仓库名称，例如：分析代码"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          maxLength={120}
+        />
+        <Button type="submit" disabled={create.isPending || !newName.trim()}>
+          <Plus size={16} />
+          创建仓库
+        </Button>
+      </form>
+      <Failure error={repositories.error} retry={refreshAll} />
+      <div className="mt-5 space-y-4">
+        {repositories.isPending ? (
+          <p className="text-sm text-muted-foreground">加载仓库…</p>
+        ) : (
+          <>
+            {list.map((repo) => (
+              <article key={repo.id} className="rounded-xl border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium">{repo.name}</h3>
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      {shortId(repo.id)}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="复制仓库 ID"
+                      onClick={() => copyText(repo.id)}
+                    >
+                      <Copy size={13} />
+                    </Button>
+                    <RenameRepository repo={repo} onDone={refreshAll} />
+                  </div>
+                </div>
+                <ul className="mt-3 space-y-2">
+                  {(byRepo.get(repo.id) ?? []).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-start justify-between gap-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <CopyRow copy={c} devices={devices} />
+                      </div>
+                      <BindCopy
+                        copy={c}
+                        repositories={list}
+                        onDone={refreshAll}
+                      />
+                    </div>
+                  ))}
+                  {(byRepo.get(repo.id) ?? []).length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      尚无副本关联到此仓库。
+                    </p>
+                  )}
+                </ul>
+              </article>
+            ))}
+            <article className="rounded-xl border border-dashed p-4">
+              <h3 className="font-medium text-muted-foreground">未归类</h3>
+              <ul className="mt-3 space-y-2">
+                {ungrouped.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-start justify-between gap-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <CopyRow copy={c} devices={devices} />
+                    </div>
+                    <BindCopy
+                      copy={c}
+                      repositories={list}
+                      onDone={refreshAll}
+                    />
+                  </div>
+                ))}
+                {ungrouped.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    没有未归类的副本。
+                  </p>
+                )}
+              </ul>
+            </article>
+          </>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -831,6 +1230,11 @@ export function ProjectDetail({ id }: { id: string }) {
           </div>
         </form>
       </section>
+      <RepositoriesPanel
+        projectId={id}
+        copies={copies.data}
+        devices={devices.data}
+      />
       <HistoryPanel projectId={id} />
     </div>
   )
