@@ -1,4 +1,4 @@
-# 开发状态 · 2026-09-20
+# 开发状态 · 2026-09-21
 
 ## 当前交付
 
@@ -48,3 +48,9 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 ## T02 第四轮审计 · 2026-09-20
 
 交付 HEAD `1fade9c` 已复审，R1–R6 已知代码问题全部关闭，本轮未发现新的阻断代码缺陷。独立回归 93 passed、2 条既有弃用警告，无 skip/deselect；前端构建、增量 Ruff、真实 Compose 路径检查及新旧入口故障注入通过。整体状态为 `blocked_environment`：可以进入远端验收，但当前版本 PG/容器/重启/备份恢复证据仍未补齐，尚非 accepted；不整合 main，不开始 T03。详见 [第四轮报告](handoff/reports/T02-review-round4.md)。下一步从 [远端说明](handoff/T02-remote-server.zh-CN.md) 第 5 节上传确定版本，已有基础环境准备无需重做。
+
+## T03 规划交付 · 2026-09-21
+
+按用户请求新增 [T03 完整任务卡](handoff/TASK-03-repository-identity.zh-CN.md)，明确 Repository UUID、同项目副本显式关联、并发版本、旧 Agent 兼容、迁移与 A01–A13 验收；更新 [后续路线图](handoff/ROADMAP.zh-CN.md)，区分多机器手动试用、GitHub 总览和个人日常使用，并拆分可提前执行的 T14a 云运行基础与 T14b 上线验收。
+
+本次只修改规划与交接文档，没有新增 Repository 模型/API 或开始 T03 编码。T03 状态 planned，实施等待 T02 accepted 并整合 main。T02 仍以第四轮报告为准，远端运行验收尚未完成。后续各包不因出现在路线图就自动获得实施授权。

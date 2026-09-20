@@ -1,6 +1,6 @@
 # Claude Code / Kimi 开发交接
 
-交接日期：2026-09-19。实现基线：`2a0d8eb`。本文件与其他交接文档将作为后续独立文档提交；实际工作从包含这些文件的当前干净 HEAD 开始，**不要 reset 到实现基线**。
+更新日期：2026-09-21。T01 已 accepted；T02 已关闭代码问题，等待远端运行验收；T03 已有完整任务卡，尚未实施。状态以 docs/status.md 和对应审计报告为准。实现时记录实际 main/base/head，**不要 reset 到历史参考提交**。
 
 ## 1. 工作目标与现状
 
@@ -17,7 +17,7 @@
 | backend/app/api/deps.py | 用户和设备相关认证依赖的基础入口 |
 | backend/app/core/config.py、db.py | 配置、引擎和模型注册 |
 | backend/app/alembic/versions/ | 迁移，基线 revision 为 d42026f707b5 |
-| backend/tests/conftest.py | 当前强制临时 SQLite，默认 create_all/drop_all |
+| backend/tests/conftest.py | 默认自建临时 SQLite；显式 TEST_DATABASE_URL 启用 PG，TEST_SCHEMA_FROM_MIGRATIONS=1 使用 Alembic |
 | backend/tests/api/routes/test_research.py | 权限、修订、设备与倒序上报现有测试 |
 | frontend/src/research/Workspace.tsx | 总览、项目详情、设备页面；按需拆出新组件 |
 | frontend/src/research/api.ts | 科研 API 类型与请求函数 |
@@ -29,12 +29,12 @@
 
 ## 2. 当前任务与交付顺序
 
-1. 执行 [T01：研究记录修订历史](TASK-01-history.zh-CN.md)。含迁移、API、前端与测试，形成一份完整可审查交付。
-2. 提交 `docs/handoff/reports/T01-implementation.md`，回复提交范围，等待 Codex 独立审计。
-3. 按审计问题在同一任务分支追加修复提交，保留可比较的历史。
-4. 审计通过后，由 Codex 在本地整合；再执行 [T02：PostgreSQL 与 Compose 联调](TASK-02-postgres-compose.zh-CN.md)。重复同样流程。
+1. T01 已通过第三轮独立审计并整合 main，不重复实施。
+2. T02 已通过代码修复复审（[第四轮报告](reports/T02-review-round4.md)），整体 blocked_environment；先按 [远端说明](T02-remote-server.zh-CN.md) 补运行证据，accepted 后由 Codex 整合。
+3. [T03：Repository 身份及项目关联](TASK-03-repository-identity.zh-CN.md) 已编写。当前只完成规划授权；实施等待 T02 accepted 并整合 main，届时按任务卡启动条件和实际用户指令推进。
+4. T04–T14 见 [路线图](ROADMAP.zh-CN.md)，包含多机器手动试用、GitHub 总览和日常云使用里程碑。后续每包实施前另定完整契约，不自动连续开发全部任务。
 
-T01 代码审计与 T02 不同时改同一工作目录。无需保持一个模型空转等待：交付时结束会话；用户把提交信息交给审计方后，再根据审计结果续接。这里没有跨客户端自动唤醒机制，也没有部署常驻协调器。
+每包交付实现报告 → Codex 独立审计 → 实现方追加最小修复 → accepted 后整合。交付后结束会话，由用户转交简短消息；没有跨客户端自动唤醒或后台协调服务。不同时在同一工作目录修改不同任务。
 
 ## 3. 分工与 Git 约定
 
@@ -44,7 +44,7 @@ T01 代码审计与 T02 不同时改同一工作目录。无需保持一个模�
 
 启动检查 `git status --short`、当前分支与 HEAD。若工作树有别人的修改，保留并说明，不能 reset/clean/stash 后继续假装干净。
 
-干净仓库从当前交接 HEAD 创建 `codex/task-01-history`；T02 从审计整合后的 main 创建 `codex/task-02-postgres-compose`。分支已存在则先核查对应报告和提交，不覆盖重建。任务报告记录实际 base SHA，不能只写旧基线。
+T03 启动时从已包含 T02 accepted 与任务卡的实际 main 创建 `codex/task-03-repository-identity`。T02 当前分支保留到验收整合。任何任务分支已存在时先核查报告和提交，不覆盖重建；记录实际 base SHA，不能只写历史参考提交。
 
 一个任务可有几个连贯提交（迁移/API、页面、测试修复）；不要提交构建产物、依赖、测试数据库或密钥。提交命令仅 add 本任务文件。无需远端、PR 或 push。交付后不自行合并 main，不自行进入下一个任务；这是本次分工的审计边界，不是每次编辑前向用户求批准。
 
@@ -64,7 +64,7 @@ Linux 对应 `.venv/bin/python` 和 `npm`。需要新环境时按 README 安装�
 
 初始开发服务使用 8000/5173；它们可能已由用户运行，先确认端口归属，不为测试结束任意进程。隔离联调用其他端口和数据库。未经明确指定，不把真实 `.env`/credentials.local.txt 用于测试，不运行会对当前开发库迁移或清空的命令。首次测试基线为 66 passed，含模板测试；这不是覆盖率或“全系统安全”证明。
 
-当前 SQLite 单测会覆盖 DATABASE_URL，因此仅在外面设置 PostgreSQL URL 并跑旧命令，并没有测到 PostgreSQL。T02 必须解决这个验证缺口。
+当前默认测试强制使用本次拥有的临时 SQLite。PG 测试必须显式设置专用 TEST_DATABASE_URL；从迁移建模式另设置 TEST_SCHEMA_FROM_MIGRATIONS=1，检查日志的实际 dialect。容器测试按用户决定在远端执行，本机 Docker 不再重试。不能用普通 DATABASE_URL 或开发 .env 作为测试目标。
 
 ## 5. 共同不可破坏的约束
 
@@ -82,14 +82,16 @@ Linux 对应 `.venv/bin/python` 和 `npm`。需要新环境时按 README 安装�
 
 使用固定任务 ID + base/head SHA + 报告传递上下文，不拷贝整段聊天。每包只记录实际可取得的输入、缓存输入、输出/推理计量及费用；不可取得写 unknown，不以耗时或代码行数反推 token。不要求更换用户已经配置的模型。
 
-## 7. 可直接发给 Claude Code 的启动消息
+## 7. T03 的转交消息
+
+只有 T02 已 accepted 并整合、用户确定启动 T03 后使用。下面是实施提示，不是本次规划已经启动实现的记录。
 
 ```text
-请在 D:\files\research-manager 工作。阅读 CLAUDE.md、AGENTS.md、docs/status.md，按 docs/handoff/START_HERE.zh-CN.md 的约定执行 TASK-01-history.zh-CN.md。先核对当前分支和干净状态，从当前包含交接文档的 HEAD 建立任务分支；不要回退到旧基线。完成实现、迁移、测试和前端验证，创建本地提交，并按 REPORT_TEMPLATE.md 写 T01 实现报告。只完成 T01，不推送、不自行合并、不启动 T02。交付实际 base/head SHA、检查结果和未解决事项，等待独立审计。现有模型使用你已配置的 Kimi 后端，不需要改模型设置。
+请在 D:\files\research-manager 工作，读取 AGENTS.md、docs/status.md、docs/handoff/START_HERE.zh-CN.md 和 docs/handoff/TASK-03-repository-identity.zh-CN.md。核对 T02 已 accepted 并整合 main，工作区干净；条件不满足只报告实际缺口。满足后从实际 main 创建 codex/task-03-repository-identity，按任务卡实施并验证 A01–A13，只做 T03。保持 Agent 只读与旧数据兼容；本机 Docker 不重试，PG/容器测试在远端隔离环境完成。分步提交，创建 docs/handoff/reports/T03-implementation.md，记录实际 base/head、执行证据和未执行项；不自标 accepted、不合并、不推送、不自行开始 T04。
 ```
 
-实现结束后发给 Codex：
+交付后发给 Codex：
 
 ```text
-请按 D:\files\research-manager\docs\handoff\REVIEW_PROTOCOL.zh-CN.md 审计 T01。实现报告在 docs/handoff/reports/T01-implementation.md，分支为 codex/task-01-history；请读取报告中的实际 base/head SHA，独立检查和验证，写审计结论。不要仅凭实现报告判通过。
+请按 D:\files\research-manager\docs\handoff\REVIEW_PROTOCOL.zh-CN.md 审计 T03。任务卡是 TASK-03-repository-identity.zh-CN.md，报告是 reports/T03-implementation.md。核对实际 base/head，重点检查显式身份、所有权、关联并发、迁移保真、旧 Agent 兼容与只读边界，独立验证后把结果写入 research-manager 的交接目录。
 ```

@@ -44,7 +44,7 @@ ready → implementing → ready_for_review → accepted
 
 accepted 后由 Codex 本地整合到 main，保留实现与审计提交；优先 fast-forward，出现分歧时核查双方变更，不能强制重置 main。整合后更新 docs/status.md 的实际功能和待办，而非直接删除所有旧限制。无需远端 push。
 
-用户把审计结论或报告路径交给 Claude Code，即可继续修复或开始下一张已指定任务卡。T02 accepted 后先用两包成本数据调整分工；T03 以后仅有路线图，需再明确任务契约，不自动连续做完全部功能。
+用户把审计结论或报告路径交给 Claude Code，即可继续修复或开始下一张已指定任务卡。T02 accepted 后先用两包成本数据调整分工；T03 已有 TASK-03-repository-identity.zh-CN.md，但实施仍等待 T02 accepted 与整合；T04 以后仅有路线图，实施前另定任务契约，不自动连续做完全部功能。
 
 ## 成本比较口径
 

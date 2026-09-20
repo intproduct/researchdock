@@ -1,12 +1,11 @@
-# 交付记录
+# 交付与审计记录
 
-这里存放实现及独立审计报告，不放运行日志、数据库、密码或会话转录。
+更新日期：2026-09-21。这里存放实现及独立审计报告，不放运行日志、数据库、密码或会话转录。历史报告结论只覆盖其记录的提交，最新事实以对应报告和 docs/status.md 为准。
 
-当前尚无任务实现或审计报告。首批：
-
-| 任务 | 初始状态 | 实现报告 | 审计报告 |
+| 任务 | 当前状态 | 实现报告 | 最新独立审计 |
 | --- | --- | --- | --- |
-| T01 | ready | 完成后创建 T01-implementation.md | 审计时创建 T01-review.md |
-| T02 | 待 T01 accepted | 完成后创建 T02-implementation.md | 审计时创建 T02-review.md |
+| T01 | accepted，已整合 | [实现](T01-implementation.md) | [第三轮](T01-review-round3.md) |
+| T02 | 代码问题关闭，远端验收待完成 | [实现](T02-implementation.md) | [第四轮](T02-review-round4.md)，blocked_environment |
+| T03 | 任务卡已编写，未实施 | 实现交付时创建 T03-implementation.md | 交付后创建 T03-review.md |
 
-任务实际状态以后以对应报告和具体提交为准，不把此初始表格当作动态调度系统。
+T03 见 [任务卡](../TASK-03-repository-identity.zh-CN.md)，其他工作包见 [路线图](../ROADMAP.zh-CN.md)。不要预先创建填写“通过”的实现报告。

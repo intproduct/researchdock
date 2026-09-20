@@ -1,6 +1,6 @@
 # Txx 实现报告
 
-> 复制为 reports/T01-implementation.md 或 T02-implementation.md；不要修改本模板充当交付。所有“未执行/unknown”均如实保留。这里没有占位的成功结论。
+> 按任务 ID 复制为 reports/Txx-implementation.md（例如 T03-implementation.md）；不要修改本模板充当交付。所有“未执行/unknown”均如实保留。这里没有占位的成功结论。
 
 - 状态：implementing / ready_for_review / blocked_environment
 - 任务卡：
