@@ -12,6 +12,7 @@ from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.models import User, get_datetime_utc
 from app.research_models import (
     CopyCreate,
+    CopyRepositoryBinding,
     Device,
     DeviceCreate,
     DevicePublic,
@@ -23,6 +24,10 @@ from app.research_models import (
     ProjectRevisionPublic,
     ProjectSnapshot,
     ProjectUpdate,
+    Repository,
+    RepositoryCreate,
+    RepositoryPublic,
+    RepositoryUpdate,
     WorkingCopy,
 )
 
@@ -190,6 +195,113 @@ def project_copies(project_id: uuid.UUID, session: SessionDep, user: CurrentUser
     ).all()
 
 
+def require_repository(
+    session, repository_id: uuid.UUID, owner_id: uuid.UUID
+) -> Repository:
+    repository = session.get(Repository, repository_id)
+    if not repository:
+        raise HTTPException(404, "仓库不存在")
+    # Ownership is derived from the parent project; never trust the id alone.
+    require_project(session, repository.project_id, owner_id)
+    return repository
+
+
+@router.get(
+    "/projects/{project_id}/repositories", response_model=list[RepositoryPublic]
+)
+def list_repositories(project_id: uuid.UUID, session: SessionDep, user: CurrentUser):
+    require_project(session, project_id, user.id)
+    rows = session.exec(
+        select(Repository)
+        .where(Repository.project_id == project_id)
+        .order_by(Repository.created_at, Repository.id)
+    ).all()
+    return [RepositoryPublic.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/projects/{project_id}/repositories",
+    response_model=RepositoryPublic,
+    status_code=201,
+)
+def create_repository(
+    project_id: uuid.UUID, body: RepositoryCreate, session: SessionDep, user: CurrentUser
+):
+    require_project(session, project_id, user.id)
+    repository = Repository(project_id=project_id, name=body.name)
+    session.add(repository)
+    session.commit()
+    session.refresh(repository)
+    return RepositoryPublic.model_validate(repository)
+
+
+@router.put("/repositories/{repository_id}", response_model=RepositoryPublic)
+def rename_repository(
+    repository_id: uuid.UUID,
+    body: RepositoryUpdate,
+    session: SessionDep,
+    user: CurrentUser,
+):
+    require_repository(session, repository_id, user.id)
+    updated_at = get_datetime_utc()
+    # Atomic conditional rename: the expected revision guards against two
+    # sessions editing the same repository; a stale expectation writes nothing.
+    result = session.execute(
+        update(Repository)
+        .where(Repository.id == repository_id, Repository.revision == body.revision)
+        .values(name=body.name, revision=body.revision + 1, updated_at=updated_at)
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        raise HTTPException(409, "仓库已被更新，请刷新后再保存")
+    session.commit()
+    return RepositoryPublic.model_validate(session.get(Repository, repository_id))
+
+
+@router.put("/copies/{copy_id}/repository", response_model=WorkingCopy)
+def bind_copy_repository(
+    copy_id: uuid.UUID,
+    body: CopyRepositoryBinding,
+    session: SessionDep,
+    user: CurrentUser,
+):
+    copy = session.get(WorkingCopy, copy_id)
+    if not copy:
+        raise HTTPException(404, "副本不存在")
+    # Only the owner of the copy's project may change the binding.
+    require_project(session, copy.project_id, user.id)
+    if body.repository_id is not None:
+        target = session.get(Repository, body.repository_id)
+        if not target:
+            raise HTTPException(404, "仓库不存在")
+        if target.project_id != copy.project_id:
+            raise HTTPException(422, "仓库不属于该副本所在项目")
+    if copy.binding_revision != body.binding_revision:
+        # A stale expectation is a conflict even when the target matches, so an
+        # idempotent-looking retry can never mask a real concurrent change.
+        raise HTTPException(409, "关联已被更新，请刷新后再提交")
+    if copy.repository_id == body.repository_id:
+        # Same target, valid expectation: no-op, return as-is without bumping.
+        return copy
+    result = session.execute(
+        update(WorkingCopy)
+        .where(
+            WorkingCopy.id == copy_id,
+            WorkingCopy.binding_revision == body.binding_revision,
+        )
+        .values(
+            repository_id=body.repository_id,
+            binding_revision=body.binding_revision + 1,
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        raise HTTPException(409, "关联已被更新，请刷新后再提交")
+    session.commit()
+    session.refresh(copy)
+    return copy
+
+
 @router.get("/devices", response_model=list[DevicePublic])
 def devices(session: SessionDep, user: CurrentUser):
     return session.exec(
@@ -240,9 +352,33 @@ def heartbeat(session: SessionDep, device: AgentDevice):
     return {"ok": True}
 
 
+@router.get(
+    "/agent/projects/{project_id}/repositories",
+    response_model=list[RepositoryPublic],
+)
+def agent_repositories(
+    project_id: uuid.UUID, session: SessionDep, device: AgentDevice
+):
+    # Read-only listing scoped to the device owner's projects; a revoked device
+    # is already rejected by get_device with 401.
+    require_project(session, project_id, device.owner_id)
+    rows = session.exec(
+        select(Repository)
+        .where(Repository.project_id == project_id)
+        .order_by(Repository.created_at, Repository.id)
+    ).all()
+    return [RepositoryPublic.model_validate(r) for r in rows]
+
+
 @router.post("/agent/copies", response_model=WorkingCopy)
 def bind_copy(body: CopyCreate, session: SessionDep, device: AgentDevice):
     require_project(session, body.project_id, device.owner_id)
+    if body.repository_id is not None:
+        target = session.get(Repository, body.repository_id)
+        # A repository that does not exist or belongs to another project must
+        # reject the registration rather than create an orphan or cross bind.
+        if not target or target.project_id != body.project_id:
+            raise HTTPException(422, "仓库不存在或不属于该项目")
     existing = session.exec(
         select(WorkingCopy).where(
             WorkingCopy.device_id == device.id,
@@ -252,14 +388,48 @@ def bind_copy(body: CopyCreate, session: SessionDep, device: AgentDevice):
     if existing:
         if existing.project_id != body.project_id:
             raise HTTPException(409, "该目录已绑定其他项目")
-        return existing
-    copy = WorkingCopy(**body.model_dump(), device_id=device.id)
+        if body.repository_id is None:
+            # Legacy/unspecified registration: keep the current binding as-is,
+            # never unbind or auto-create a repository. Old agents stay usable.
+            return existing
+        if existing.repository_id == body.repository_id:
+            # Idempotent retry of a lost response: return the existing binding
+            # unchanged (same id/sequence/binding_revision).
+            return existing
+        # The device may not reclassify an already-bound copy; the owner must
+        # correct the association via the web interface.
+        raise HTTPException(409, "该目录的仓库关联与请求不一致，请在网页端更正")
+    copy = WorkingCopy(
+        project_id=body.project_id,
+        local_path=body.local_path,
+        repository_id=body.repository_id,
+        # A copy registered with an explicit repository starts at binding 1;
+        # an uncategorized one stays at the 0 default.
+        binding_revision=1 if body.repository_id is not None else 0,
+        device_id=device.id,
+    )
     session.add(copy)
     try:
         session.commit()
     except IntegrityError:
         session.rollback()
-        raise HTTPException(409, "目录已登记，请重试以读取已有绑定")
+        # A concurrent first registration of the same (device, path) won the
+        # unique constraint between our existence check and commit. Re-read the
+        # winner so identical concurrent parameters converge on the same id
+        # instead of erroring; a winner with different parameters still 409s.
+        winner = session.exec(
+            select(WorkingCopy).where(
+                WorkingCopy.device_id == device.id,
+                WorkingCopy.local_path == body.local_path,
+            )
+        ).first()
+        if not winner:
+            raise HTTPException(409, "目录已登记，请重试以读取已有绑定")
+        if winner.project_id != body.project_id:
+            raise HTTPException(409, "该目录已绑定其他项目")
+        if body.repository_id is not None and winner.repository_id != body.repository_id:
+            raise HTTPException(409, "该目录的仓库关联与请求不一致，请在网页端更正")
+        return winner
     session.refresh(copy)
     return copy
 

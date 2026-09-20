@@ -149,9 +149,15 @@ def main():
     p.add_argument("--email", required=True)
     p.add_argument("--name")
     commands.add_parser("projects", help="查看可绑定的项目 ID")
+    p = commands.add_parser("repositories", help="查看项目下可绑定的仓库 ID")
+    p.add_argument("--project", required=True)
     p = commands.add_parser("link", help="显式登记一个仓库根目录")
     p.add_argument("--project", required=True)
     p.add_argument("--path", required=True)
+    p.add_argument(
+        "--repository",
+        help="可选：显式绑定到该仓库 UUID；仓库身份来自网页确认，不由 remote 推断",
+    )
     p = commands.add_parser("scan", help="只读扫描并上报，断网时保存最后观察")
     p.add_argument("--watch", type=int, default=0, help="每隔多少秒重复扫描，至少 15 秒")
     commands.add_parser("status", help="查看本地登记与待上报数量")
@@ -170,19 +176,40 @@ def main():
                 server, token = credentials(db)
                 for project in request(server, "/agent/projects", token):
                     print(f"{project['id']}  {project['name']}")
+            elif args.command == "repositories":
+                server, token = credentials(db)
+                for repo in request(
+                    server, f"/agent/projects/{args.project}/repositories", token
+                ):
+                    print(f"{repo['id']}  {repo['name']}")
             elif args.command == "link":
                 path = str(Path(args.path).expanduser().resolve(strict=True))
                 scan(path)  # Validate Git root before any registration.
                 server, token = credentials(db)
-                copy = request(
-                    server, "/agent/copies", token, {"project_id": args.project, "local_path": path}
-                )
+                body = {"project_id": args.project, "local_path": path}
+                if args.repository:
+                    body["repository_id"] = args.repository
+                copy = request(server, "/agent/copies", token, body)
+                if args.repository:
+                    # An explicit bind must be confirmed by the server. An old
+                    # server that ignores repository_id (returns null/absent) or
+                    # a mismatched one means the bind did NOT happen; fail rather
+                    # than print a false "bound" success. Never retry to mutate.
+                    returned = copy.get("repository_id")
+                    if returned != args.repository:
+                        raise ValueError(
+                            "服务器未确认仓库绑定（可能为旧版本服务端，副本或已登记为未归类）；"
+                            "请升级服务端并在网页核对关联，不要重试篡改绑定"
+                        )
                 with db:
                     db.execute(
                         "INSERT INTO copies VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET sequence=MAX(copies.sequence,excluded.sequence)",
                         (copy["id"], path, copy["sequence"]),
                     )
-                print("已登记：", path)
+                if args.repository:
+                    print(f"已登记并绑定仓库 {args.repository}：", path)
+                else:
+                    print("已登记（未归类，可在网页关联仓库）：", path)
             else:
                 while True:
                     code = run_scan(db)
