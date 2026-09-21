@@ -649,41 +649,58 @@ function CopyBindingDialog({
   onClose: () => void
   onDone: () => void
 }) {
-  // `editing` captures the copy id the dialog opened for, so the draft/selection
-  // persists even while `copies` refetches and the row moves between groups.
-  const [editing, setEditing] = useState<string | null>(null)
-  const [target, setTarget] = useState("")
-  const [conflict, setConflict] = useState(false)
-  const base = useRef(0)
-  const floor = useRef(0)
-  const current = copies?.find((c) => c.id === editing)
-  const open = editing !== null
-  if (copyId !== editing) {
-    // A newly requested edit resets the draft from the freshest copy state.
-    setEditing(copyId)
-    setConflict(false)
+  // All edit state lives in ONE authoritative object keyed by the copy being
+  // edited (R4). Switching to a different copy atomically reinitializes base and
+  // floor from THAT copy, so a higher-versioned copy can never pollute the
+  // baseline of a lower-versioned one. `base` = expected revision sent on the
+  // next submit; `floor` = newest confirmed binding_revision for this copy.
+  const [st, setSt] = useState<{
+    id: string | null
+    target: string
+    base: number
+    floor: number
+    conflict: boolean
+  }>({ id: null, target: "", base: 0, floor: 0, conflict: false })
+  const open = st.id !== null
+  if (copyId !== st.id) {
     const c = copies?.find((x) => x.id === copyId)
-    base.current = c?.binding_revision ?? 0
-    setTarget(c?.repository_id ?? "")
+    const v = c?.binding_revision ?? 0
+    setSt({
+      id: copyId,
+      target: c?.repository_id ?? "",
+      base: v,
+      floor: v,
+      conflict: false,
+    })
+  } else if (st.id !== null) {
+    // Same copy: a fresher confirmed revision only ever raises the floor, never
+    // lowers it, so a slow/stale refetch cannot roll back the conflict baseline.
+    const c = copies?.find((x) => x.id === st.id)
+    if (c && c.binding_revision > st.floor) {
+      setSt((p) => ({ ...p, floor: c.binding_revision }))
+    }
   }
-  // Track the newest confirmed binding_revision so a slow/stale refetch can
-  // never lower the baseline floor mid-conflict.
-  if (current) floor.current = Math.max(floor.current, current.binding_revision)
+  const current = copies?.find((c) => c.id === st.id)
   const mutation = useMutation({
     mutationFn: () =>
       api<WorkingCopy>(
-        `/copies/${editing}/repository`,
+        `/copies/${st.id}/repository`,
         {
-          repository_id: target === "" ? null : target,
-          binding_revision: base.current,
+          repository_id: st.target === "" ? null : st.target,
+          binding_revision: st.base,
         },
         "PUT",
       ),
     onSuccess: (saved) => {
       toast.success("关联已更新（仅更改管理关系，不搬动本地文件）")
-      floor.current = Math.max(floor.current, saved.binding_revision)
-      setConflict(false)
-      setEditing(null)
+      const v = saved.binding_revision
+      setSt((p) => ({
+        ...p,
+        id: null,
+        base: v,
+        floor: Math.max(p.floor, v),
+        conflict: false,
+      }))
       onClose()
       onDone()
     },
@@ -691,7 +708,7 @@ function CopyBindingDialog({
       if (isApiError(e, 409)) {
         // Refresh to reveal the latest association, but keep the user's target
         // selection; adopting the newest baseline is an explicit step below.
-        setConflict(true)
+        setSt((p) => ({ ...p, conflict: true }))
         onDone()
       } else {
         toast.error(e.message)
@@ -699,18 +716,16 @@ function CopyBindingDialog({
     },
   })
   function close() {
-    setEditing(null)
-    setConflict(false)
+    setSt((p) => ({ ...p, id: null, conflict: false }))
     onClose()
   }
-  const canAdopt = floor.current > base.current
+  const canAdopt = st.floor > st.base
   function adoptLatest() {
     if (!canAdopt) {
       toast.error("尚未获取到更新的关联，请稍后重试")
       return
     }
-    base.current = floor.current
-    setConflict(false)
+    setSt((p) => ({ ...p, base: p.floor, conflict: false }))
   }
   const currentRepoName = current?.repository_id
     ? (repositories.find((r) => r.id === current.repository_id)?.name ??
@@ -730,7 +745,7 @@ function CopyBindingDialog({
             只更改管理关系，不搬动本地文件，也不改变观察历史。
           </DialogDescription>
         </DialogHeader>
-        {conflict && (
+        {st.conflict && (
           <div
             role="alert"
             className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40"
@@ -759,8 +774,8 @@ function CopyBindingDialog({
         >
           <select
             aria-label="选择仓库"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
+            value={st.target}
+            onChange={(e) => setSt((p) => ({ ...p, target: e.target.value }))}
             className={`${inputStyle} bg-card`}
           >
             <option value="">未归类</option>

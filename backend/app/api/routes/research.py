@@ -199,10 +199,18 @@ def require_repository(
     session, repository_id: uuid.UUID, owner_id: uuid.UUID
 ) -> Repository:
     repository = session.get(Repository, repository_id)
+    # Ownership is derived from the parent project via a single owner-scoped
+    # check. A nonexistent id and another account's repository return the SAME
+    # status and body, so the response never reveals whether the UUID exists.
     if not repository:
         raise HTTPException(404, "仓库不存在")
-    # Ownership is derived from the parent project; never trust the id alone.
-    require_project(session, repository.project_id, owner_id)
+    owner_project = session.exec(
+        select(Project.id).where(
+            Project.id == repository.project_id, Project.owner_id == owner_id
+        )
+    ).first()
+    if owner_project is None:
+        raise HTTPException(404, "仓库不存在")
     return repository
 
 

@@ -93,6 +93,15 @@ UI 操作步骤及可观察结果：浏览器端到端（A11）未执行——�
 
 回归：后端 `test_repositories.py` 10 passed；Agent 12 passed；前端类型检查+生产构建+Biome 通过。完整回归见最新提交说明。A05/A10 的 PG 实测与 A13 Linux 仍按前述保留未执行。
 
+## 第二轮审计修复（R3 正文统一 + R4）
+
+审计 `T03-review-round2.md`（changes_requested）：R1/R2 原始复现已通过；R3 仅统一了状态码，错误正文仍可区分；新增 R4。
+
+- **R3（错误正文统一）**：`require_repository` 改为单一 owner 作用域查询——目标仓库不存在与属于其他账户时，返回**相同状态码 404 且相同正文 `"仓库不存在"`**；仅当仓库确属本账户但跨项目时返回 422。用户绑定入口与设备登记入口共用此语义。回归测试现断言两入口的**完整错误 JSON 完全一致**（不再仅比较 status_code），并核对拒绝后副本 repository_id/binding_revision 未变。
+- **R4（版本下限按副本隔离）**：`CopyBindingDialog` 的编辑状态重构为单一权威对象 `{id, target, base, floor, conflict}`，按所编辑副本原子初始化/切换；同副本的新鲜确认 revision 只升不降 floor。消除了先编辑高版本副本、再编辑低版本副本时旧 floor 污染新副本基线导致的冲突恢复失败。保留稳定层对话框与显式采用基线确认，后端版本校验不变。
+
+验证：后端 `test_repositories.py` 10 passed（含完整 JSON 断言）；前端 tsc+Vite 构建与 Biome 通过；改动文件 Ruff 通过。R4 的真实浏览器交互回归（高版本→低版本连续编辑并各自冲突恢复）由 Codex 复测。
+
 ## 重要：本次会话的协议偏离（用户明确授权）
 
 用户在本会话明确授权两点，偏离了 `docs/status.md` 与任务卡 §1 的既定启动条件：(1) 豁免 T02 远端运行验收即视为可推进；(2) 在 T02 正式 accepted 之前开始 T03 编码。据此我将 T02 分支快进整合入 main 并基于此建立 T03 分支（base `62cb7f1`）。T02 的远端 PG/容器/重启/备份恢复证据仍缺失；本报告不因此宣称 T02 已 accepted，相应审计结论以 Codex 正式记录为准。

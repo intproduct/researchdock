@@ -261,36 +261,41 @@ def test_binding_target_ownership_status_layering(
     copy = register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}").json()
     url = f"/api/v1/copies/{copy['id']}/repository"
 
-    # Another account's repository -> 404 for the owner of p1 (indistinguishable).
+    # Another account's repository and a nonexistent id must return the SAME
+    # status AND body, so the response never reveals whether the UUID exists.
     other_p = project(client, oh, "别人项目")
     other_repo = make_repository(client, oh, other_p["id"])
-    assert (
-        client.put(url, headers=h, json={"repository_id": other_repo["id"], "binding_revision": 0}).status_code
-        == 404
+    resp_other = client.put(
+        url, headers=h, json={"repository_id": other_repo["id"], "binding_revision": 0}
     )
-    # Nonexistent -> 404.
-    assert (
-        client.put(url, headers=h, json={"repository_id": str(uuid.uuid4()), "binding_revision": 0}).status_code
-        == 404
+    resp_missing = client.put(
+        url, headers=h, json={"repository_id": str(uuid.uuid4()), "binding_revision": 0}
     )
-    # Own account but different project -> 422.
+    assert resp_other.status_code == 404 and resp_missing.status_code == 404
+    assert resp_other.json() == resp_missing.json()  # identical error body
+    # Own account but different project -> 422 (a distinct, intentional signal).
     assert (
         client.put(url, headers=h, json={"repository_id": own_other["id"], "binding_revision": 0}).status_code
         == 422
     )
+    # Rejections left the copy untouched.
+    untouched = client.get(f"/api/v1/projects/{p1['id']}/copies", headers=h).json()[0]
+    assert untouched["repository_id"] is None and untouched["binding_revision"] == 0
     # Own account, same project -> 200.
     ok = client.put(url, headers=h, json={"repository_id": own_here["id"], "binding_revision": 0})
     assert ok.status_code == 200 and ok.json()["repository_id"] == own_here["id"]
     # Only the successful bind advanced the version.
     assert ok.json()["binding_revision"] == 1
 
-    # Same layering for the device registration entry point.
+    # Same layering (status AND body) for the device registration entry point.
     p_agent_other = project(client, h, "项目三")
     agent_foreign = make_repository(client, h, p_agent_other["id"])
-    base = {"project_id": p1["id"], "local_path": f"C:/research/{uuid.uuid4()}"}
-    assert register(client, dh, p1["id"], base["local_path"], repository_id=str(uuid.uuid4())).status_code == 404
-    assert register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=other_repo["id"]).status_code == 404
-    assert register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=agent_foreign["id"]).status_code == 422
+    r_missing = register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=str(uuid.uuid4()))
+    r_other = register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=other_repo["id"])
+    r_own_other = register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=agent_foreign["id"])
+    assert r_missing.status_code == 404 and r_other.status_code == 404
+    assert r_missing.json() == r_other.json()  # no existence leak via body
+    assert r_own_other.status_code == 422
 
 
 # --- A06: cross-account isolation and device role boundaries ---
