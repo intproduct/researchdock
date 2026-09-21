@@ -17,7 +17,6 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -62,19 +61,20 @@ def wait_ready(timeout=60):
         try:
             urllib.request.urlopen(f"{BASE}/api/v1/utils/health-check/", timeout=3)
             return True
-        except Exception:
+        except (OSError, ValueError):
+            # Server not up yet (connection refused) or malformed URL; keep polling.
             time.sleep(0.5)
     return False
 
 
 def make_git_repo(path: Path):
     path.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True)
     (path / "f.txt").write_text("x")
-    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
-        cwd=path, check=True,
+        cwd=path, check=True, capture_output=True,
     )
 
 
@@ -84,7 +84,7 @@ def run_agent(home: Path, argv: list[str]):
     env["PYTHONPATH"] = str(ROOT / "agent")
     return subprocess.run(
         [PY, "-m", "research_agent", *argv],
-        env=env, capture_output=True, text=True, cwd=ROOT / "agent",
+        env=env, capture_output=True, text=True, cwd=ROOT / "agent", check=False,
     )
 
 
@@ -124,66 +124,75 @@ def main():
          "--port", str(PORT), "--log-level", "error"],
         cwd=ROOT / "backend", env=env,
     )
-    if not wait_ready():
-        print("FAIL: server did not become ready", flush=True)
-        server.terminate()
-        return 1
-    print(f"server ready on {BASE}", flush=True)
-
-    token = login_token(email, password)
-    project = http("/projects", {"name": "论文A", "stage": "active"}, token)
-    repo = http(f"/projects/{project['id']}/repositories", {"name": "分析代码"}, token)
-    print(f"project={project['id']} repository={repo['id']}")
-
-    # Two isolated agents, each with its own home and device, both binding the
-    # same repository UUID. Device enrollment is done over HTTP (equivalent to
-    # `login`, which prompts for a password that cannot be piped non-interactively
-    # on Windows); the device token is written into each agent's own state db.
-    reports = []
-    for name, sub in (("win-agent-a", "a"), ("win-agent-b", "b")):
-        home = work / f"home-{sub}"
-        repo_dir = work / f"repo-{sub}"
-        make_git_repo(repo_dir)
-        enrollment = http("/devices", {"name": name, "platform": "Windows"}, token)
-        home.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(home / "agent.db")
-        conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.executemany("INSERT INTO settings VALUES (?,?)",
-                         [("server", BASE), ("token", enrollment["token"])])
-        conn.commit()
-        conn.close()
-        repos = run_agent(home, ["repositories", "--project", project["id"]])
-        assert repos.returncode == 0 and repo["id"] in repos.stdout, repos.stderr
-        link = run_agent(home, [
-            "link", "--project", project["id"], "--repository", repo["id"],
-            "--path", str(repo_dir),
-        ])
-        assert link.returncode == 0, f"link {name}: {link.stderr}"
-        print(f"linked {name}", flush=True)
-        scan = run_agent(home, ["scan"])
-        assert scan.returncode == 0, f"scan {name}: {scan.stderr}"
-        print(f"scanned {name}", flush=True)
-        reports.append((name, link.stdout.strip()))
-
-    # Both copies must be grouped under the same repository server-side.
-    copies = http(f"/projects/{project['id']}/copies", None, token)
-    assert len(copies) == 2, copies
-    assert all(c["repository_id"] == repo["id"] for c in copies), copies
-    assert all(c["binding_revision"] == 1 for c in copies), copies
-    assert all(c["sequence"] >= 1 for c in copies), copies
-    # Uncategorized group is empty.
-    assert not any(c["repository_id"] is None for c in copies), copies
-
-    server.terminate()
     try:
-        server.wait(timeout=10)
-    except Exception:
-        server.kill()
-    shutil.rmtree(work, True)
-    print("A13 SMOKE OK: 2 isolated agents bound one repository; grouped correctly")
-    for name, msg in reports:
-        print(f"  {name}: {msg}")
-    return 0
+        if not wait_ready():
+            print("FAIL: server did not become ready", flush=True)
+            return 1
+        print(f"server ready on {BASE}", flush=True)
+
+        token = login_token(email, password)
+        project = http("/projects", {"name": "论文A", "stage": "active"}, token)
+        repo = http(
+            f"/projects/{project['id']}/repositories", {"name": "分析代码"}, token
+        )
+        print(f"project={project['id']} repository={repo['id']}", flush=True)
+
+        # Two isolated agents, each with its own home and device, both binding the
+        # same repository UUID. Device enrollment is done over HTTP (equivalent to
+        # `login`, which prompts for a password that cannot be piped
+        # non-interactively on Windows); the token goes to each agent's own db.
+        reports = []
+        for name, sub in (("win-agent-a", "a"), ("win-agent-b", "b")):
+            home = work / f"home-{sub}"
+            repo_dir = work / f"repo-{sub}"
+            make_git_repo(repo_dir)
+            enrollment = http("/devices", {"name": name, "platform": "Windows"}, token)
+            home.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(home / "agent.db")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings"
+                " (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            conn.executemany(
+                "INSERT INTO settings VALUES (?,?)",
+                [("server", BASE), ("token", enrollment["token"])],
+            )
+            conn.commit()
+            conn.close()
+            repos = run_agent(home, ["repositories", "--project", project["id"]])
+            assert repos.returncode == 0 and repo["id"] in repos.stdout, repos.stderr
+            link = run_agent(home, [
+                "link", "--project", project["id"], "--repository", repo["id"],
+                "--path", str(repo_dir),
+            ])
+            assert link.returncode == 0, f"link {name}: {link.stderr}"
+            print(f"linked {name}", flush=True)
+            scan = run_agent(home, ["scan"])
+            assert scan.returncode == 0, f"scan {name}: {scan.stderr}"
+            print(f"scanned {name}", flush=True)
+            reports.append((name, link.stdout.strip()))
+
+        # Both copies must be grouped under the same repository server-side.
+        copies = http(f"/projects/{project['id']}/copies", None, token)
+        assert len(copies) == 2, copies
+        assert all(c["repository_id"] == repo["id"] for c in copies), copies
+        assert all(c["binding_revision"] == 1 for c in copies), copies
+        assert all(c["sequence"] >= 1 for c in copies), copies
+        # Uncategorized group is empty.
+        assert not any(c["repository_id"] is None for c in copies), copies
+
+        print("A13 SMOKE OK: 2 isolated agents bound one repository; grouped correctly")
+        for name, msg in reports:
+            print(f"  {name}: {msg}")
+        return 0
+    finally:
+        # Always reclaim the self-built server and the temp workspace.
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+        shutil.rmtree(work, True)
 
 
 if __name__ == "__main__":

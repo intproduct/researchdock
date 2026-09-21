@@ -233,9 +233,64 @@ def test_binding_rejects_cross_project_and_bad_values(
         ).status_code
         == 422
     )
+    # A nonexistent repository id and another account's repository both -> 404,
+    # so the caller cannot distinguish existence from the status code.
+    assert (
+        client.put(
+            f"/api/v1/copies/{copy['id']}/repository",
+            headers=h,
+            json={"repository_id": str(uuid.uuid4()), "binding_revision": 0},
+        ).status_code
+        == 404
+    )
     # State unchanged after the rejected attempts.
     current = client.get(f"/api/v1/projects/{p1['id']}/copies", headers=h).json()[0]
     assert current["repository_id"] is None and current["binding_revision"] == 0
+
+
+def test_binding_target_ownership_status_layering(
+    client, superuser_token_headers, normal_user_token_headers
+):
+    """R3 regression: nonexistent and other-account repos are both 404; only the
+    caller's own other project is 422; the copy's own project succeeds."""
+    h, oh = superuser_token_headers, normal_user_token_headers
+    p1, p2 = project(client, h, "项目一"), project(client, h, "项目二")
+    own_other = make_repository(client, h, p2["id"])  # same account, other project
+    own_here = make_repository(client, h, p1["id"])  # same account, same project
+    _, dh = enroll(client, h)
+    copy = register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}").json()
+    url = f"/api/v1/copies/{copy['id']}/repository"
+
+    # Another account's repository -> 404 for the owner of p1 (indistinguishable).
+    other_p = project(client, oh, "别人项目")
+    other_repo = make_repository(client, oh, other_p["id"])
+    assert (
+        client.put(url, headers=h, json={"repository_id": other_repo["id"], "binding_revision": 0}).status_code
+        == 404
+    )
+    # Nonexistent -> 404.
+    assert (
+        client.put(url, headers=h, json={"repository_id": str(uuid.uuid4()), "binding_revision": 0}).status_code
+        == 404
+    )
+    # Own account but different project -> 422.
+    assert (
+        client.put(url, headers=h, json={"repository_id": own_other["id"], "binding_revision": 0}).status_code
+        == 422
+    )
+    # Own account, same project -> 200.
+    ok = client.put(url, headers=h, json={"repository_id": own_here["id"], "binding_revision": 0})
+    assert ok.status_code == 200 and ok.json()["repository_id"] == own_here["id"]
+    # Only the successful bind advanced the version.
+    assert ok.json()["binding_revision"] == 1
+
+    # Same layering for the device registration entry point.
+    p_agent_other = project(client, h, "项目三")
+    agent_foreign = make_repository(client, h, p_agent_other["id"])
+    base = {"project_id": p1["id"], "local_path": f"C:/research/{uuid.uuid4()}"}
+    assert register(client, dh, p1["id"], base["local_path"], repository_id=str(uuid.uuid4())).status_code == 404
+    assert register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=other_repo["id"]).status_code == 404
+    assert register(client, dh, p1["id"], f"C:/research/{uuid.uuid4()}", repository_id=agent_foreign["id"]).status_code == 422
 
 
 # --- A06: cross-account isolation and device role boundaries ---
@@ -371,6 +426,12 @@ def test_agent_registration_retry_and_legacy_compatibility(
         client, dh, p["id"], f"C:/research/{uuid.uuid4()}", repository_id=foreign["id"]
     )
     assert rejected.status_code == 422
+
+    # A nonexistent repository id is 404 (not 422): no existence signal.
+    missing = register(
+        client, dh, p["id"], f"C:/research/{uuid.uuid4()}", repository_id=str(uuid.uuid4())
+    )
+    assert missing.status_code == 404
 
     # Registering with an explicit repository at creation starts at binding 1.
     bound_at_creation = register(

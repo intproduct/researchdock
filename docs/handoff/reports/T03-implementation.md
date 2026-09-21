@@ -35,7 +35,7 @@
 | A08 旧 API/旧 Agent payload 兼容 | 通过 | 旧登记不传 repository_id → 未归类且不清空已有绑定（同测试文件） |
 | A09 新 Agent 遇旧服务器不谎报 | 通过 | agent/tests/test_cli_repositories.py |
 | A10 空库/旧库升级、回退再升级、模式一致 | 通过（SQLite） | test_t03_upgrade_preserves_data…、test_t03_downgrade…；strict metadata diff 为空；PG 未执行 |
-| A11 页面创建/改名/分组/关联冲突保留输入 | 部分（构建+类型通过；浏览器实测未执行） | 前端 build 与 Biome 通过；冲突保留输入逻辑在 RenameRepository/BindCopy 实现，未经浏览器实测 |
+| A11 页面创建/改名/分组/关联冲突保留输入 | 已发现缺陷并修复（R1/R2） | 独立审计在浏览器复现改名冲突无法重试、改绑冲突丢选择；已重构为项目级单一关联对话框+显式采用基线恢复路径，经类型检查与生产构建验证；浏览器回归由 Codex 复测 |
 | A12 约束与清理、级联不退化 | 通过 | 复合 FK 拒绝跨项目绑定（test_binding_rejects_cross_project_and_bad_values）；全量回归无级联回归 |
 | A13 独立端到端（两 Agent 绑定同仓库） | 通过（Windows） | scripts/audit/t03_smoke.py 实跑成功；Linux 冒烟未执行 |
 
@@ -81,6 +81,17 @@ UI 操作步骤及可观察结果：浏览器端到端（A11）未执行——�
 - 尚未进行独立审计；请按 REVIEW_PROTOCOL 审计。
 - 包含报告的 HEAD SHA 见最终提交（本报告随文档提交一并落地）。
 - 下一任务：等待审计；不自行写 accepted、不整合 main、不推送、不开始 T04。
+
+## 第一轮审计修复（R1–R3 + 非阻断项）
+
+审计 `T03-review.md`（changes_requested）的三项 P2 与非阻断项已修复：
+
+- **R3（后端授权分层）**：`bind_copy_repository` 与 Agent `bind_copy` 均先经 `require_repository` 验证所有权再判同项目——不存在与其他账户仓库统一 404，仅本账户另一项目 422。新增 `test_binding_target_ownership_status_layering`（四类目标）与不存在的登记 404 断言。
+- **R1（改名冲突恢复）**：`RenameRepository` 的期望基线移入 ref 并维护 floor（防慢响应倒退）；409 后提供“采用最新基线（保留草稿）”显式按钮——仅当已确认更新的 revision 时才可用，加载失败/不新鲜则拒绝，不静默重试、不去掉乐观锁。
+- **R2（改绑状态稳定层）**：`BindCopy` 拆为行内触发器 + 面板级单一 `CopyBindingDialog`；编辑中 copy id、目标选择、期望版本、冲突状态驻留面板层，不随副本跨分组移动而卸载；冲突后显式采用最新基线再提交，不自动覆盖选择。
+- **非阻断**：冒烟脚本 4 条 Ruff（F401/BLE001×2/PLW1510）修复并改 finally 回收服务，重跑 A13 仍通过；Agent 无 `--repository` 重复登记已关联副本时按返回的 repository_id 如实显示“保持现有仓库关联”（新增测试）；本报告 A11 已更正为“已发现缺陷并修复”。
+
+回归：后端 `test_repositories.py` 10 passed；Agent 12 passed；前端类型检查+生产构建+Biome 通过。完整回归见最新提交说明。A05/A10 的 PG 实测与 A13 Linux 仍按前述保留未执行。
 
 ## 重要：本次会话的协议偏离（用户明确授权）
 

@@ -495,26 +495,40 @@ function RenameRepository({
 }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(repo.name)
-  // Pin the revision the dialog opened with; a 409 must show fresh data and
-  // never silently reuse a stale expectation.
-  const [base, setBase] = useState(repo.revision)
   const [conflict, setConflict] = useState(false)
+  // base lives in a ref so a conflict can advance it to the latest confirmed
+  // revision without unmounting the dialog or discarding the typed draft.
+  // floorRevision tracks the newest revision this client is sure of, so a slow
+  // GET/list that resolves to an older value can never roll the baseline back.
+  const base = useRef(repo.revision)
+  const floorRevision = useRef(repo.revision)
+  const floorFor = useRef(repo.id)
+  if (floorFor.current !== repo.id) {
+    floorFor.current = repo.id
+    base.current = repo.revision
+    floorRevision.current = repo.revision
+  }
+  // A fresh render carrying a newer confirmed revision raises the floor.
+  floorRevision.current = Math.max(floorRevision.current, repo.revision)
   const mutation = useMutation({
     mutationFn: () =>
       api<Repository>(
         `/repositories/${repo.id}`,
-        { name, revision: base },
+        { name, revision: base.current },
         "PUT",
       ),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       toast.success("仓库已改名")
       setConflict(false)
+      base.current = saved.revision
+      floorRevision.current = Math.max(floorRevision.current, saved.revision)
       setOpen(false)
       onDone()
     },
     onError: (e: Error) => {
       if (isApiError(e, 409)) {
-        // Keep the typed name; surface the conflict and let the user refresh.
+        // Keep the typed name; refresh so the panel shows the latest value, and
+        // let the user explicitly adopt the newest baseline before retrying.
         setConflict(true)
         onDone()
       } else {
@@ -522,6 +536,18 @@ function RenameRepository({
       }
     },
   })
+  // Adopt the newest confirmed baseline while keeping the draft. Refuse if the
+  // refreshed props have not actually advanced past our known floor (a failed
+  // or stale refetch must not be mistaken for a new baseline).
+  const canAdopt = floorRevision.current > base.current
+  function adoptLatest() {
+    if (!canAdopt) {
+      toast.error("尚未获取到更新的版本，请稍后重试")
+      return
+    }
+    base.current = floorRevision.current
+    setConflict(false)
+  }
   return (
     <Dialog
       open={open}
@@ -529,7 +555,7 @@ function RenameRepository({
         setOpen(v)
         if (v) {
           setName(repo.name)
-          setBase(repo.revision)
+          base.current = floorRevision.current
           setConflict(false)
         }
       }}
@@ -547,13 +573,24 @@ function RenameRepository({
           </DialogDescription>
         </DialogHeader>
         {conflict && (
-          <p
+          <div
             role="alert"
             className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40"
           >
-            该仓库已被更新到修订 {repo.revision}。你的输入已保留；最新名称是 “
-            {repo.name}”。确认后请重新提交。
-          </p>
+            <p>
+              该仓库已被更新到修订 {floorRevision.current}
+              。你的名称草稿已保留；最新名称是 “{repo.name}”。
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              disabled={!canAdopt}
+              onClick={adoptLatest}
+            >
+              采用最新基线（保留草稿）
+            </Button>
+          </div>
         )}
         <form
           onSubmit={(e) => {
@@ -582,37 +619,78 @@ function RenameRepository({
   )
 }
 
-function BindCopy({
-  copy,
+function BindCopy({ onEdit }: { onEdit: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-label="更改关联"
+      onClick={onEdit}
+      className="shrink-0"
+    >
+      更改关联
+    </Button>
+  )
+}
+
+// A single binding dialog owned by the panel (not by each repository group), so
+// a rebind that moves the copy between groups never unmounts it mid-edit and the
+// user's selection survives (R2). State is keyed by the copy being edited.
+function CopyBindingDialog({
+  copyId,
+  copies,
   repositories,
+  onClose,
   onDone,
 }: {
-  copy: WorkingCopy
+  copyId: string | null
+  copies: WorkingCopy[] | undefined
   repositories: Repository[]
+  onClose: () => void
   onDone: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [target, setTarget] = useState(copy.repository_id ?? "")
-  const [base, setBase] = useState(copy.binding_revision)
+  // `editing` captures the copy id the dialog opened for, so the draft/selection
+  // persists even while `copies` refetches and the row moves between groups.
+  const [editing, setEditing] = useState<string | null>(null)
+  const [target, setTarget] = useState("")
   const [conflict, setConflict] = useState(false)
+  const base = useRef(0)
+  const floor = useRef(0)
+  const current = copies?.find((c) => c.id === editing)
+  const open = editing !== null
+  if (copyId !== editing) {
+    // A newly requested edit resets the draft from the freshest copy state.
+    setEditing(copyId)
+    setConflict(false)
+    const c = copies?.find((x) => x.id === copyId)
+    base.current = c?.binding_revision ?? 0
+    setTarget(c?.repository_id ?? "")
+  }
+  // Track the newest confirmed binding_revision so a slow/stale refetch can
+  // never lower the baseline floor mid-conflict.
+  if (current) floor.current = Math.max(floor.current, current.binding_revision)
   const mutation = useMutation({
     mutationFn: () =>
       api<WorkingCopy>(
-        `/copies/${copy.id}/repository`,
+        `/copies/${editing}/repository`,
         {
           repository_id: target === "" ? null : target,
-          binding_revision: base,
+          binding_revision: base.current,
         },
         "PUT",
       ),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       toast.success("关联已更新（仅更改管理关系，不搬动本地文件）")
+      floor.current = Math.max(floor.current, saved.binding_revision)
       setConflict(false)
-      setOpen(false)
+      setEditing(null)
+      onClose()
       onDone()
     },
     onError: (e: Error) => {
       if (isApiError(e, 409)) {
+        // Refresh to reveal the latest association, but keep the user's target
+        // selection; adopting the newest baseline is an explicit step below.
         setConflict(true)
         onDone()
       } else {
@@ -620,23 +698,31 @@ function BindCopy({
       }
     },
   })
+  function close() {
+    setEditing(null)
+    setConflict(false)
+    onClose()
+  }
+  const canAdopt = floor.current > base.current
+  function adoptLatest() {
+    if (!canAdopt) {
+      toast.error("尚未获取到更新的关联，请稍后重试")
+      return
+    }
+    base.current = floor.current
+    setConflict(false)
+  }
+  const currentRepoName = current?.repository_id
+    ? (repositories.find((r) => r.id === current.repository_id)?.name ??
+      "已关联仓库")
+    : "未归类"
   return (
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        setOpen(v)
-        if (v) {
-          setTarget(copy.repository_id ?? "")
-          setBase(copy.binding_revision)
-          setConflict(false)
-        }
+        if (!v) close()
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" aria-label="更改关联">
-          更改关联
-        </Button>
-      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>更改副本的仓库关联</DialogTitle>
@@ -645,12 +731,24 @@ function BindCopy({
           </DialogDescription>
         </DialogHeader>
         {conflict && (
-          <p
+          <div
             role="alert"
             className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40"
           >
-            该副本的关联已被更新。你的选择已保留；请刷新查看最新关联后重新提交。
-          </p>
+            <p>
+              该副本的关联已被另一处更新（当前：{currentRepoName}
+              ）。你的选择已保留； 采用最新基线后可重新提交。
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              disabled={!canAdopt}
+              onClick={adoptLatest}
+            >
+              采用最新基线（保留选择）
+            </Button>
+          </div>
         )}
         <form
           onSubmit={(e) => {
@@ -714,6 +812,9 @@ function RepositoriesPanel({
     cache.invalidateQueries({ queryKey: ["repositories", projectId] })
     cache.invalidateQueries({ queryKey: ["copies", projectId] })
   }
+  // Which copy is being (re)bound; null = dialog closed. Kept at panel level so
+  // the dialog survives the copy moving between repository groups.
+  const [editingCopyId, setEditingCopyId] = useState<string | null>(null)
   const list = repositories.data ?? []
   const byRepo = new Map<string, WorkingCopy[]>()
   const ungrouped: WorkingCopy[] = []
@@ -798,11 +899,7 @@ function RepositoriesPanel({
                       <div className="min-w-0 flex-1">
                         <CopyRow copy={c} devices={devices} />
                       </div>
-                      <BindCopy
-                        copy={c}
-                        repositories={list}
-                        onDone={refreshAll}
-                      />
+                      <BindCopy onEdit={() => setEditingCopyId(c.id)} />
                     </div>
                   ))}
                   {(byRepo.get(repo.id) ?? []).length === 0 && (
@@ -824,11 +921,7 @@ function RepositoriesPanel({
                     <div className="min-w-0 flex-1">
                       <CopyRow copy={c} devices={devices} />
                     </div>
-                    <BindCopy
-                      copy={c}
-                      repositories={list}
-                      onDone={refreshAll}
-                    />
+                    <BindCopy onEdit={() => setEditingCopyId(c.id)} />
                   </div>
                 ))}
                 {ungrouped.length === 0 && (
@@ -841,6 +934,13 @@ function RepositoriesPanel({
           </>
         )}
       </div>
+      <CopyBindingDialog
+        copyId={editingCopyId}
+        copies={copies}
+        repositories={list}
+        onClose={() => setEditingCopyId(null)}
+        onDone={refreshAll}
+      />
     </section>
   )
 }

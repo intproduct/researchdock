@@ -271,9 +271,11 @@ def bind_copy_repository(
     # Only the owner of the copy's project may change the binding.
     require_project(session, copy.project_id, user.id)
     if body.repository_id is not None:
+        # Validate ownership before the same-project check so a nonexistent id
+        # and another account's repository are indistinguishable (both 404);
+        # only a repository in the caller's own *other* project yields 422.
+        require_repository(session, body.repository_id, user.id)
         target = session.get(Repository, body.repository_id)
-        if not target:
-            raise HTTPException(404, "仓库不存在")
         if target.project_id != copy.project_id:
             raise HTTPException(422, "仓库不属于该副本所在项目")
     if copy.binding_revision != body.binding_revision:
@@ -374,11 +376,12 @@ def agent_repositories(
 def bind_copy(body: CopyCreate, session: SessionDep, device: AgentDevice):
     require_project(session, body.project_id, device.owner_id)
     if body.repository_id is not None:
+        # Ownership first: a nonexistent id and another account's repository are
+        # both 404 (no existence leak); only the owner's own other project is 422.
+        require_repository(session, body.repository_id, device.owner_id)
         target = session.get(Repository, body.repository_id)
-        # A repository that does not exist or belongs to another project must
-        # reject the registration rather than create an orphan or cross bind.
-        if not target or target.project_id != body.project_id:
-            raise HTTPException(422, "仓库不存在或不属于该项目")
+        if target.project_id != body.project_id:
+            raise HTTPException(422, "仓库不属于该项目")
     existing = session.exec(
         select(WorkingCopy).where(
             WorkingCopy.device_id == device.id,

@@ -208,6 +208,11 @@ def main():
                     )
                 if args.repository:
                     print(f"已登记并绑定仓库 {args.repository}：", path)
+                elif copy.get("repository_id"):
+                    # Re-registering an already-bound copy without --repository:
+                    # the server kept the existing binding, so report it truthfully
+                    # instead of claiming the copy is uncategorized.
+                    print(f"已登记（保持现有仓库关联 {copy['repository_id']}）：", path)
                 else:
                     print("已登记（未归类，可在网页关联仓库）：", path)
             else:

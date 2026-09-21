@@ -99,6 +99,23 @@ def test_link_with_repository_mismatched_server_fails(env, monkeypatch, capsys):
     assert "未确认仓库绑定" in out.err
 
 
+def test_link_without_repository_keeps_existing_binding_message(
+    env, monkeypatch, capsys
+):
+    """Re-registering an already-bound copy (no --repository) reports the real
+    binding, not 'uncategorized'."""
+    existing_repo = str(uuid.uuid4())
+    code, out, body = run_link(
+        monkeypatch,
+        capsys,
+        {"id": str(uuid.uuid4()), "sequence": 3, "repository_id": existing_repo},
+    )
+    assert code == 0
+    assert "repository_id" not in body
+    assert "未归类" not in out.out
+    assert existing_repo in out.out and "保持现有仓库关联" in out.out
+
+
 def test_repositories_command_lists(env, monkeypatch, capsys):
     repos = [
         {"id": str(uuid.uuid4()), "name": "分析代码"},
