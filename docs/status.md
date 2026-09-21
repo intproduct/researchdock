@@ -64,3 +64,7 @@ T03 已交付实现：Repository 身份模型与同项目复合 FK、迁移 `c4d
 ## T03 首轮独立审计 · 2026-09-21
 
 交付 HEAD `1ee164d` 已审计，结论 `changes_requested`：三项 P2 为仓库改名冲突后旧 revision 无法更新、关联冲突分组刷新卸载对话框丢失选择、目标仓库授权返回码泄漏跨账户存在性。真实浏览器复现前两项，普通账户 API 探针复现第三项。独立回归 109 passed、前端构建与 Windows 双 Agent 冒烟通过；新增冒烟脚本 Ruff 报四条错误。PG/Linux 和未覆盖的 UI 异常路径仍未验收。报告见 [T03-review](handoff/reports/T03-review.md)。不整合 T03、不进入 T04；main 保持已实际整合 T02 的 62cb7f1，T02 的远端缺口继续保留。
+
+## T03 第二轮独立审计 · 2026-09-21
+
+交付 HEAD `e99cad7` 已复审，仍为 `changes_requested`。R1/R2 原始复现已通过；R3 404 正文仍泄漏跨账户仓库存在性；新增 R4 为不同副本共用版本下限导致冲突重试失败。两项 P2 见 [第二轮报告](handoff/reports/T03-review-round2.md)。独立完整回归 111 passed、2 条既有弃用警告；前端构建、增量 Ruff、Windows 双 Agent 冒烟通过，真实浏览器复现 R4。PG/Linux 与其余 UI 异常路径仍待验证。不整合 T03，不开始 T04，main 仍为 62cb7f1。
