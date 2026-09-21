@@ -60,3 +60,7 @@ T01 追加“项目状态快照历史”：新建项目即写入 revision=1 的 
 用户在本会话明确授权：豁免 T02 远端运行验收即推进，并在 T02 正式 accepted 前开始 T03 编码（偏离既定协议，T02 远端 PG/容器/重启/备份恢复证据仍缺失，不视为 accepted）。据此 T02 分支已快进整合入 main（无重写），T03 自实际 main（base `62cb7f1`）建 `codex/task-03-repository-identity`。
 
 T03 已交付实现：Repository 身份模型与同项目复合 FK、迁移 `c4d8e2f15a07`、仓库 CRUD 与副本绑定 API、Agent `repositories`/`link --repository`、前端仓库分组面板，及 A01–A13 测试（A05/A10 仅 SQLite 实测、A11 浏览器与 A13 Linux 未执行）。详见 [T03 实现报告](handoff/reports/T03-implementation.md)。状态 `ready_for_review`，等待 Codex 独立审计；未自标 accepted。
+
+## T03 首轮独立审计 · 2026-09-21
+
+交付 HEAD `1ee164d` 已审计，结论 `changes_requested`：三项 P2 为仓库改名冲突后旧 revision 无法更新、关联冲突分组刷新卸载对话框丢失选择、目标仓库授权返回码泄漏跨账户存在性。真实浏览器复现前两项，普通账户 API 探针复现第三项。独立回归 109 passed、前端构建与 Windows 双 Agent 冒烟通过；新增冒烟脚本 Ruff 报四条错误。PG/Linux 和未覆盖的 UI 异常路径仍未验收。报告见 [T03-review](handoff/reports/T03-review.md)。不整合 T03、不进入 T04；main 保持已实际整合 T02 的 62cb7f1，T02 的远端缺口继续保留。

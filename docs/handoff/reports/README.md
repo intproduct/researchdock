@@ -6,6 +6,6 @@
 | --- | --- | --- | --- |
 | T01 | accepted，已整合 | [实现](T01-implementation.md) | [第三轮](T01-review-round3.md) |
 | T02 | 代码问题关闭，远端验收待完成 | [实现](T02-implementation.md) | [第四轮](T02-review-round4.md)，blocked_environment |
-| T03 | 任务卡已编写，未实施 | 实现交付时创建 T03-implementation.md | 交付后创建 T03-review.md |
+| T03 | changes_requested，三项 P2；另有运行证据缺口 | [实现](T03-implementation.md) | [首轮审计](T03-review.md) |
 
 T03 见 [任务卡](../TASK-03-repository-identity.zh-CN.md)，其他工作包见 [路线图](../ROADMAP.zh-CN.md)。不要预先创建填写“通过”的实现报告。
