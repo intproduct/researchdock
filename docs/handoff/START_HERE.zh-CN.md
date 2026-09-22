@@ -1,6 +1,6 @@
 # Claude Code / Kimi 开发交接
 
-更新日期：2026-09-21。T01 已 accepted；T02 已关闭代码问题，等待远端运行验收；T03 已交付并完成第二轮审计，当前 changes_requested。状态以 docs/status.md 和对应审计报告为准。实现时记录实际 main/base/head，**不要 reset 到历史参考提交**。
+更新日期：2026-09-22。T01 已 accepted；T02 已关闭代码问题，等待远端运行验收；T03 已完成第三轮审计，已知代码问题关闭，当前 blocked_environment。状态以 docs/status.md 和对应审计报告为准。实现时记录实际 main/base/head，**不要 reset 到历史参考提交**。
 
 ## 1. 工作目标与现状
 
@@ -31,7 +31,7 @@
 
 1. T01 已通过第三轮独立审计并整合 main，不重复实施。
 2. T02 已通过代码修复复审（[第四轮报告](reports/T02-review-round4.md)），整体仍有运行缺口。实际已整合至 main（62cb7f1）；实现报告记录了提前推进的授权例外，不等于远端验收已通过。按 [远端说明](T02-remote-server.zh-CN.md) 补证据。
-3. [T03：Repository 身份及项目关联](TASK-03-repository-identity.zh-CN.md) 已交付，当前按 [第二轮审计](reports/T03-review-round2.md) 在现有 codex/task-03-repository-identity 分支修复 R3/R4 两项 P2 并补验证，不重新建分支或重复启动。
+3. [T03：Repository 身份及项目关联](TASK-03-repository-identity.zh-CN.md) 已交付，当前按 [第三轮审计](reports/T03-review-round3.md) 在现有 codex/task-03-repository-identity 分支补远端运行及剩余 UI 验证；R1–R4 已关闭，不重新建分支或重复启动。
 4. T04–T14 见 [路线图](ROADMAP.zh-CN.md)，包含多机器手动试用、GitHub 总览和日常云使用里程碑。后续每包实施前另定完整契约，不自动连续开发全部任务。
 
 每包交付实现报告 → Codex 独立审计 → 实现方追加最小修复 → accepted 后整合。交付后结束会话，由用户转交简短消息；没有跨客户端自动唤醒或后台协调服务。不同时在同一工作目录修改不同任务。
@@ -84,7 +84,7 @@ Linux 对应 `.venv/bin/python` 和 `npm`。需要新环境时按 README 安装�
 
 ## 7. T03 的转交消息
 
-以下保留首次启动提示作历史参考。当前 T03 已交付，应直接按 T03-review-round2.md 在现有分支修复，不再执行首次建分支步骤。实际提前启动例外见实现报告与 status。
+以下保留首次启动提示作历史参考。当前 T03 已交付，应直接按 T03-review-round3.md 补验证证据，不再执行首次建分支步骤。实际提前启动例外见实现报告与 status。
 
 ```text
 请在 D:\files\research-manager 工作，读取 AGENTS.md、docs/status.md、docs/handoff/START_HERE.zh-CN.md 和 docs/handoff/TASK-03-repository-identity.zh-CN.md。核对 T02 已 accepted 并整合 main，工作区干净；条件不满足只报告实际缺口。满足后从实际 main 创建 codex/task-03-repository-identity，按任务卡实施并验证 A01–A13，只做 T03。保持 Agent 只读与旧数据兼容；本机 Docker 不重试，PG/容器测试在远端隔离环境完成。分步提交，创建 docs/handoff/reports/T03-implementation.md，记录实际 base/head、执行证据和未执行项；不自标 accepted、不合并、不推送、不自行开始 T04。

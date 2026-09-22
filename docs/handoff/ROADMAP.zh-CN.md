@@ -6,7 +6,7 @@
 
 - T01：accepted，已整合 main，提供项目状态快照历史。
 - T02：第四轮审计已关闭 R1–R6；93 项本地回归通过，状态仍为 blocked_environment，待当前版本远端 PG/完整容器/重启/恢复验收。
-- T03：已有 [完整任务卡](TASK-03-repository-identity.zh-CN.md) 并已交付；第二轮审计 changes_requested，R3/R4 两项 P2 待修复，见 [审计报告](reports/T03-review-round2.md)。实际 main 已包含 T02；实现报告记录提前启动的授权例外，但 T02/T03 缺失运行证据仍保留。
+- T03：已有 [完整任务卡](TASK-03-repository-identity.zh-CN.md) 并已交付；第三轮审计 blocked_environment，R1–R4 已关闭，运行及剩余 UI 证据待补，见 [审计报告](reports/T03-review-round3.md)。实际 main 已包含 T02；实现报告记录提前启动的授权例外，但 T02/T03 缺失运行证据仍保留。
 - T04–T14：以下为规划范围和退出标准，尚不是可直接执行的任务卡。每包实施前补数据/API/权限/兼容/验证契约，并明确选定范围。
 
 编号表示工作包，不是必须连续执行的时间顺序。T08 可在 T02 后独立推进，T10 可在 T01 后推进；是否并行由用户指定，并用隔离分支处理，不自动启动多个 Agent。
