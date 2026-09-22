@@ -72,3 +72,9 @@ T03 已交付实现：Repository 身份模型与同项目复合 FK、迁移 `c4d
 ## T03 第三轮独立审计 · 2026-09-22
 
 交付 HEAD `80b2102` 已复审，R3/R4 通过独立 API 与浏览器复验，R1–R4 已知代码问题全部关闭，本轮未发现新的阻断代码缺陷。111 passed、2 条既有弃用警告；前端构建、增量 Ruff 通过。真实浏览器连续编辑高/低版本副本、关闭重开、HTTP 503 后重试及未归类分组冲突恢复通过。整体为 `blocked_environment`：PG 并发/迁移、Linux CLI、T02 远端运行及 A11 其余异常时序证据待补，尚非 accepted。详见 [第三轮报告](handoff/reports/T03-review-round3.md)。不整合 T03、不启动 T04；main 保持 62cb7f1。
+
+## T04 计划交付 · 2026-09-22
+
+按用户请求完成 [T04 任务卡](handoff/TASK-04-github-connection.zh-CN.md)，状态 `planned`。根据当前代码与 GitHub 官方文档，选定个人精细权限 PAT、每用户一连接、本人 GitHub 仓库与 Repository UUID 显式映射；规定凭据加密/轮换/本地断开、身份与版本、错误脱敏、迁移、前端草稿保护及 A01–A13 验收。规划分 T04.1–T04.5 实施，复用现有 httpx 并采用成熟加密库，不克隆其他项目、不引入额外服务。
+
+本次仅修改规划与交接文档，没有实现 GitHub 接口、创建真实连接或处理真实 PAT。正常实施等待 T03 accepted 并整合及 T02 运行缺口补齐；用户如另行明确授权提前推进须记录例外，不能自动推定。T03 仍为 blocked_environment，main 保持 62cb7f1。

@@ -1,6 +1,6 @@
 # Claude Code / Kimi 开发交接
 
-更新日期：2026-09-22。T01 已 accepted；T02 已关闭代码问题，等待远端运行验收；T03 已完成第三轮审计，已知代码问题关闭，当前 blocked_environment。状态以 docs/status.md 和对应审计报告为准。实现时记录实际 main/base/head，**不要 reset 到历史参考提交**。
+更新日期：2026-09-22。T01 已 accepted；T02 已关闭代码问题，等待远端运行验收；T03 已完成第三轮审计，已知代码问题关闭，当前 blocked_environment；T04 任务卡已编写，状态 planned。状态以 docs/status.md 和对应审计报告为准。实现时记录实际 main/base/head，**不要 reset 到历史参考提交**。
 
 ## 1. 工作目标与现状
 
@@ -32,7 +32,8 @@
 1. T01 已通过第三轮独立审计并整合 main，不重复实施。
 2. T02 已通过代码修复复审（[第四轮报告](reports/T02-review-round4.md)），整体仍有运行缺口。实际已整合至 main（62cb7f1）；实现报告记录了提前推进的授权例外，不等于远端验收已通过。按 [远端说明](T02-remote-server.zh-CN.md) 补证据。
 3. [T03：Repository 身份及项目关联](TASK-03-repository-identity.zh-CN.md) 已交付，当前按 [第三轮审计](reports/T03-review-round3.md) 在现有 codex/task-03-repository-identity 分支补远端运行及剩余 UI 验证；R1–R4 已关闭，不重新建分支或重复启动。
-4. T04–T14 见 [路线图](ROADMAP.zh-CN.md)，包含多机器手动试用、GitHub 总览和日常云使用里程碑。后续每包实施前另定完整契约，不自动连续开发全部任务。
+4. [T04：个人 GitHub 连接](TASK-04-github-connection.zh-CN.md) 已完成计划，选定精细 PAT 与本人仓库显式映射；正常实施等待 T03 accepted 并整合、T02 运行缺口补齐，除非用户另有明确例外。任务卡含分步实现、A01–A13 和转交文本，本次不启动编码。
+5. T05–T14 见 [路线图](ROADMAP.zh-CN.md)，包含多机器手动试用、GitHub 总览和日常云使用里程碑。后续每包实施前另定完整契约，不自动连续开发全部任务。
 
 每包交付实现报告 → Codex 独立审计 → 实现方追加最小修复 → accepted 后整合。交付后结束会话，由用户转交简短消息；没有跨客户端自动唤醒或后台协调服务。不同时在同一工作目录修改不同任务。
 
@@ -95,3 +96,7 @@ Linux 对应 `.venv/bin/python` 和 `npm`。需要新环境时按 README 安装�
 ```text
 请按 D:\files\research-manager\docs\handoff\REVIEW_PROTOCOL.zh-CN.md 审计 T03。任务卡是 TASK-03-repository-identity.zh-CN.md，报告是 reports/T03-implementation.md。核对实际 base/head，重点检查显式身份、所有权、关联并发、迁移保真、旧 Agent 兼容与只读边界，独立验证后把结果写入 research-manager 的交接目录。
 ```
+
+## 8. T04 计划入口
+
+使用 [TASK-04-github-connection.zh-CN.md](TASK-04-github-connection.zh-CN.md)。已固定：个人 github.com 精细权限 PAT、每用户一连接、本人仓库显式映射、令牌加密/轮换/本地断开、稳定平台 ID、并发校验与错误脱敏；分支/提交观察留给 T05。不需要 clone 额外仓库。实施步骤和可直接转交的提示在任务卡 §10–§12；先核对启动条件，不能把编写计划当作开始实现或豁免验收。
